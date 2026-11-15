@@ -1,43 +1,138 @@
 version: 2.1
 
+# B1 线 · N0 实验：证明 NeoForge 的引导链能否走"构建期静态化"路线。
+# 只做一件事：在 macOS + Java 21 上真实启动 NeoForge 21.1.250 服务端（headless），
+# 用 javaagent 把每个被加载（含 Mixin/AT 转换后）的类字节落盘，产出：
+#   dump/   全部类字节（按包路径）
+#   mixin    Mixin 导出的转换结果（-Dmixin.debug.export=true）
+#   run.log  服务端启动日志
+
 jobs:
-  build-aot:
+  neoforge-n0:
     macos:
       xcode: 27.1.0
     resource_class: m4pro.medium
     environment:
-      HOMEBREW_NO_AUTO_UPDATE: 1
-      PYTHONDONTWRITEBYTECODE: "1"
-      UPSTREAM: https://github.com/AOTFASTLNX/MCFAO
-      SOURCE_REF: feature/launcher-controls
-      MCFAO_OPT_LEVEL: -O3
+      NEOFORGE_VERSION: "21.1.250"
+      MC_VERSION: "1.21.1"
     steps:
+      - checkout
       - run:
-          name: Host facts
-          command: |
-            uname -m; sysctl -n hw.memsize | awk '{printf "memory: %.1f GiB\n", $1/1073741824}'
-            xcodebuild -version | head -2
-      - run:
-          name: Build the game IPA
-          no_output_timeout: 60m
+          name: Java 21 (Temurin)
           command: |
             set -euo pipefail
-            mkdir -p ~/build && cd ~/build
-            curl -fsSL -o build_mac.sh https://raw.githubusercontent.com/zhangrongxue/mc-aot-ios/main/build_mac.sh
-            MCFAO_TOKEN="$MCFAO_TOKEN" HEAP_GIB=8 JOBS=6 AOT_PAR=4 SLIM_ASSETS=1 \
-              UPSTREAM="$UPSTREAM" SOURCE_REF="$SOURCE_REF" bash build_mac.sh
-      - store_artifacts:
-          path: ~/mcfao-build/FabricAOT-game.ipa
-          destination: FabricAOT-game.ipa
-      - store_artifacts:
-          path: ~/mcfao-build/build.log
-          destination: build.log
+            cd "$HOME"
+            curl -fsSL -o jdk21.tar.gz "https://api.adoptium.net/v3/binary/latest/21/ga/mac/aarch64/jdk/hotspot/normal/eclipse"
+            mkdir -p jdk21 && tar xzf jdk21.tar.gz -C jdk21 --strip-components=1
+            echo 'export JAVA_HOME="$HOME/jdk21"' >> "$BASH_ENV"
+            echo 'export PATH="$HOME/jdk21/bin:$PATH"' >> "$BASH_ENV"
       - run:
-          name: Tail on failure
-          when: on_fail
-          command: tail -60 ~/mcfao-build/build.log || true
+          name: Install the NeoForge server
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            source "$BASH_ENV"
+            java -version
+            mkdir -p ~/n0/server && cd ~/n0/server
+            echo "eula=true" > eula.txt
+            INSTALLER="neoforge-${NEOFORGE_VERSION}-installer.jar"
+            curl -fsSL -o "$INSTALLER" "https://maven.neoforged.net/releases/net/neoforged/neoforge/${NEOFORGE_VERSION}/${INSTALLER}"
+            shasum -a 256 "$INSTALLER" | tee installer.sha256
+            java -jar "$INSTALLER" --installServer .
+            ls -la
+      - run:
+          name: Build the class dump agent
+          command: |
+            set -euo pipefail
+            source "$BASH_ENV"
+            mkdir -p ~/n0/agent && cd ~/n0/agent
+            cat > DumpAgent.java <<'JAVA'
+            import java.lang.instrument.Instrumentation;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.nio.file.Paths;
+            import java.security.ProtectionDomain;
+
+            public final class DumpAgent {
+                private static Path root;
+
+                public static void premain(String args, Instrumentation inst) throws Exception {
+                    root = Paths.get(args);
+                    Files.createDirectories(root);
+                    inst.addTransformer(new java.lang.instrument.ClassFileTransformer() {
+                        @Override
+                        public byte[] transform(ClassLoader loader, String name, Class<?> redef,
+                                                ProtectionDomain pd, byte[] bytes) {
+                            if (bytes == null || name == null) return null;
+                            try {
+                                Path target = root.resolve(name + ".class");
+                                Files.createDirectories(target.getParent());
+                                Files.write(target, bytes);
+                            } catch (Exception ignored) {
+                            }
+                            return null;
+                        }
+                    }, false);
+                }
+            }
+            JAVA
+            printf 'Premain-Class: DumpAgent\n' > manifest.txt
+            javac -d . DumpAgent.java
+            jar cfm dumpagent.jar manifest.txt DumpAgent.class
+            ls -l
+      - run:
+          name: Run the server and dump every loaded class
+          no_output_timeout: 20m
+          command: |
+            set -uo pipefail
+            source "$BASH_ENV"
+            cd ~/n0/server
+            mkdir -p ~/n0/dump
+            echo "-javaagent:$HOME/n0/agent/dumpagent.jar=$HOME/n0/dump" >> user_jvm_args.txt
+            echo "-Dmixin.debug.export=true" >> user_jvm_args.txt
+            sh ./run.sh nogui > ~/n0/run.log 2>&1 &
+            SERVER_PID=$!
+            i=0
+            while [ "$i" -lt 60 ]; do
+              i=$((i + 1))
+              if grep -q 'Done (' ~/n0/run.log 2>/dev/null; then echo "server reached Done at $((i*5))s"; break; fi
+              if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "server exited early"; break; fi
+              sleep 5
+            done
+            sleep 10
+            kill "$SERVER_PID" 2>/dev/null || true
+            wait "$SERVER_PID" 2>/dev/null || true
+            echo "---- log tail ----"
+            tail -40 ~/n0/run.log || true
+      - run:
+          name: Summarise the dump
+          command: |
+            set -euo pipefail
+            cd ~/n0
+            COUNT=$(find dump -name '*.class' | wc -l | tr -d ' ')
+            echo "classes dumped: $COUNT"
+            echo "top packages:"
+            find dump -name '*.class' | sed 's#^dump/##; s#/[^/]*$##' | cut -d/ -f1-3 | sort | uniq -c | sort -rn | head -20
+            echo "client classes: $(find dump -path '*net/minecraft/client/*' -name '*.class' | wc -l | tr -d ' ')"
+            echo "mixin exports: $(find server -path '*mixin.out*' -name '*.class' 2>/dev/null | wc -l | tr -d ' ')"
+            find dump -name '*.class' | sort > dump-index.txt
+            tar czf n0-dump.tgz dump
+            if [ -d server/.mixin.out ]; then tar czf n0-mixin.tgz -C server .mixin.out; fi
+            ls -lh n0-dump.tgz n0-mixin.tgz 2>/dev/null || ls -lh n0-dump.tgz
+      - store_artifacts:
+          path: ~/n0/n0-dump.tgz
+          destination: n0-dump.tgz
+      - store_artifacts:
+          path: ~/n0/n0-mixin.tgz
+          destination: n0-mixin.tgz
+      - store_artifacts:
+          path: ~/n0/run.log
+          destination: n0-run.log
+      - store_artifacts:
+          path: ~/n0/dump-index.txt
+          destination: n0-dump-index.txt
 
 workflows:
-  build:
+  n0:
     jobs:
-      - build-aot
+      - neoforge-n0
