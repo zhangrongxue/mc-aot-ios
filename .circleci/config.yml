@@ -58,23 +58,36 @@ jobs:
       - run:
           name: A. complete the graph and load it without ModLauncher
           command: |
-            set -uo pipefail
+            set -u
             source "$BASH_ENV"
             cd ~/n0
-            mkdir -p graph
             ARGS_FILE=$(find server/libraries -name unix_args.txt | head -1)
             echo "classpath file: $ARGS_FILE"
-            grep -o '[^ :]*\.jar' "$ARGS_FILE" 2>/dev/null | while read -r jar; do
-              case "$jar" in /*) full="$jar";; *) full="server/libraries/$jar";; esac
-              [ -f "$full" ] && unzip -oq "$full" -d graph -x 'META-INF/*' 'module-info.class' 2>/dev/null
-            done
-            echo "vanilla/libraries classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
-            cp -R dump/. graph/
-            echo "graph after dump overlay: $(find graph -name '*.class' | wc -l | tr -d ' ')"
+            echo "---- head of args ----"
+            head -c 400 "$ARGS_FILE" || true
+            echo
+            grep -oE '(/|[A-Za-z0-9_.-])[^:[:space:]]*\.jar' "$ARGS_FILE" | sort -u > jars.txt || true
+            echo "jars listed: $(wc -l < jars.txt | tr -d ' ')"
+            mkdir -p graph
+            while IFS= read -r jar; do
+              case "$jar" in
+                /*) full="$jar" ;;
+                *) full="server/libraries/$jar" ;;
+              esac
+              if [ -f "$full" ]; then
+                unzip -oq "$full" '*.class' -d graph 2>/dev/null || true
+              else
+                echo "missing jar: $full"
+              fi
+            done < jars.txt
+            echo "library classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
+            cp -R dump/. graph/ 2>/dev/null || true
+            echo "graph total: $(find graph -name '*.class' | wc -l | tr -d ' ')"
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/N0Load.java" .
-            javac -cp graph -d . N0Load.java
-            java -cp graph:. N0Load | tee load-smoke.txt
+            javac -cp graph -d . N0Load.java || echo "javac failed"
+            java -cp graph:. N0Load > load-smoke.txt 2>&1
             echo "load smoke exit: $?"
+            tail -20 load-smoke.txt || true
       - run:
           name: B. GraalVM native-image smoke
           no_output_timeout: 45m
