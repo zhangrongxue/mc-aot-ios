@@ -42,7 +42,7 @@ jobs:
             echo "asset: $URL"
             curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$URL" -o graph.zip
             ls -lh graph.zip
-            unzip -q graph.zip -d graph
+            python3 "$CIRCLE_WORKING_DIRECTORY/b1/n1/unzip_norm.py" graph.zip graph
             echo "classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
             echo "client classes: $(find graph -path '*net/minecraft/client/*' -name '*.class' | wc -l | tr -d ' ')"
             # native-image opens classpath entries as file systems; a jar avoids the directory path
