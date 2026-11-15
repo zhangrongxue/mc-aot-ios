@@ -44,7 +44,7 @@ public final class DumpAgent {
     public static void premain(String args, Instrumentation inst) throws Exception {
         instrumentation = inst;
         String spec = args == null ? "" : args;
-        String[] parts = spec.split("\\|", 2);
+        String[] parts = spec.split("\\|", 3);
         root = Paths.get(parts[0].isEmpty() ? "classdump" : parts[0]);
         Files.createDirectories(root);
 
@@ -68,13 +68,13 @@ public final class DumpAgent {
             }
         }, false);
 
-        startForcedLoader(parts.length == 2 ? parts[1] : "");
+        startForcedLoader(parts.length >= 2 ? parts[1] : "", parts.length >= 3 ? Long.parseLong(parts[2].trim()) : 40_000L);
     }
 
-    private static void startForcedLoader(String jarList) {
+    private static void startForcedLoader(String jarList, long delayMs) {
         Thread worker = new Thread(() -> {
             try {
-                Thread.sleep(40_000L);
+                Thread.sleep(delayMs);
             } catch (InterruptedException interrupted) {
                 return;
             }
