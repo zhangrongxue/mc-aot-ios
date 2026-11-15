@@ -64,22 +64,26 @@ def library_path(root, library):
 
 def build_classpath(root, libraries):
     entries = []
+    missing = []
     for library in libraries or []:
         if not rules_allow(library.get("rules")):
             continue
         path = library_path(root, library)
         if path and os.path.isfile(path):
             entries.append(path)
-    return os.pathsep.join(entries)
+        elif path:
+            missing.append(path)
+    return entries, missing
 
 
 def placeholder_map(root, version_id, version_json):
     natives = os.path.join(root, "natives")
     os.makedirs(natives, exist_ok=True)
+    entries, missing = build_classpath(root, version_json.get("libraries"))
     return {
         "library_directory": os.path.join(root, "libraries"),
         "classpath_separator": os.pathsep,
-        "classpath": build_classpath(root, version_json.get("libraries")),
+        "classpath": os.pathsep.join(entries),
         "natives_directory": natives,
         "version_name": version_id,
         "game_directory": os.path.join(root, "game"),
@@ -103,7 +107,7 @@ def placeholder_map(root, version_id, version_json):
         "quickPlaySingleplayer": "",
         "quickPlayMultiplayer": "",
         "quickPlayRealms": "",
-    }
+    }, entries, missing
 
 
 def expand(value, mapping):
@@ -148,6 +152,43 @@ def find_version_json(root, version_id):
     return candidates[0][1] if candidates else None
 
 
+def vanilla_version_json(root, version_id):
+    """NeoForge's client json inheritsFrom the vanilla one; fetch it if the launcher never did."""
+    path = os.path.join(root, "versions", version_id, version_id + ".json")
+    if os.path.isfile(path):
+        return path
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json", timeout=60) as response:
+            manifest = json.load(response)
+        entry = next(v for v in manifest["versions"] if v["id"] == version_id)
+        with urllib.request.urlopen(entry["url"], timeout=60) as response:
+            data = response.read()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(data)
+        print("downloaded vanilla version json for", version_id)
+        return path
+    except Exception as error:  # noqa: BLE001 - the caller reports a clearer message
+        print("cannot fetch vanilla version json:", error)
+        return None
+
+
+def merge_version(parent, child):
+    merged = dict(parent)
+    merged.update({key: value for key, value in child.items() if key != "arguments" and key != "libraries"})
+    parent_args = parent.get("arguments") or {}
+    child_args = child.get("arguments") or {}
+    merged["arguments"] = {
+        "jvm": list(parent_args.get("jvm") or []) + list(child_args.get("jvm") or []),
+        "game": list(parent_args.get("game") or []) + list(child_args.get("game") or []),
+    }
+    merged["libraries"] = list(parent.get("libraries") or []) + list(child.get("libraries") or [])
+    merged["assetIndex"] = child.get("assetIndex") or parent.get("assetIndex")
+    return merged
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, help="NeoForge install directory")
@@ -161,12 +202,22 @@ def main():
     with open(version_json_path, encoding="utf-8") as handle:
         data = json.load(handle)
     version_id = os.path.basename(version_json_path)[: -len(".json")]
-    mapping = placeholder_map(args.root, version_id, data)
+
+    parent_id = data.get("inheritsFrom")
+    if parent_id:
+        parent_path = vanilla_version_json(args.root, parent_id)
+        if parent_path:
+            with open(parent_path, encoding="utf-8") as handle:
+                data = merge_version(json.load(handle), data)
+            print("merged with parent version", parent_id)
+        else:
+            print("WARNING: parent version", parent_id, "is unavailable; args will be incomplete")
+
+    mapping, classpath_entries, classpath_missing = placeholder_map(args.root, version_id, data)
 
     jvm_args = collect_arguments((data.get("arguments") or {}).get("jvm"), mapping)
     game_args = collect_arguments((data.get("arguments") or {}).get("game"), mapping)
 
-    # --launchTarget is what turns BootstrapLauncher into the client.
     if not any(arg == "--launchTarget" for arg in game_args):
         game_args = ["--launchTarget", "forgeclient"] + game_args
 
@@ -182,10 +233,13 @@ def main():
     leftovers = sorted({token for token in " ".join(command).split() if token.startswith("${")})
     print("version json:", version_json_path)
     print("jvm args:", len(jvm_args), "game args:", len(game_args))
+    print("classpath entries:", len(classpath_entries), "missing:", len(classpath_missing))
+    if classpath_missing:
+        print("first missing:", classpath_missing[:3])
     print("unexpanded placeholders:", leftovers or "none")
-    print("command:", " ".join(command[:8]), "...")
+    print("full command:")
+    print(" ".join(command))
     if args.dry_run:
-        print(json.dumps(command, indent=2))
         return
     os.makedirs(os.path.join(args.root, "game"), exist_ok=True)
     raise SystemExit(subprocess.call(command, cwd=args.root))
