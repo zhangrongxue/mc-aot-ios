@@ -1,11 +1,9 @@
 version: 2.1
 
 # B1 线 · N0 实验：证明 NeoForge 的引导链能否走"构建期静态化"路线。
-# 只做一件事：在 macOS + Java 21 上真实启动 NeoForge 21.1.250 服务端（headless），
-# 用 javaagent 把每个被加载（含 Mixin/AT 转换后）的类字节落盘，产出：
-#   dump/   全部类字节（按包路径）
-#   mixin    Mixin 导出的转换结果（-Dmixin.debug.export=true）
-#   run.log  服务端启动日志
+# 在 macOS + Java 21 上真实启动 NeoForge 21.1.250 服务端（headless），
+# 用 javaagent 把每个被加载（含 Mixin/AT 转换后）的类字节落盘。
+# 产出：dump/（全部类字节）、mixin 导出、run.log。
 
 jobs:
   neoforge-n0:
@@ -24,15 +22,22 @@ jobs:
             cd "$HOME"
             curl -fsSL -o jdk21.tar.gz "https://api.adoptium.net/v3/binary/latest/21/ga/mac/aarch64/jdk/hotspot/normal/eclipse"
             mkdir -p jdk21 && tar xzf jdk21.tar.gz -C jdk21 --strip-components=1
-            echo 'export JAVA_HOME="$HOME/jdk21"' >> "$BASH_ENV"
-            echo 'export PATH="$HOME/jdk21/bin:$PATH"' >> "$BASH_ENV"
+            # macOS tarballs nest the JDK under Contents/Home
+            if [ -x "$HOME/jdk21/Contents/Home/bin/java" ]; then
+              ln -sfn "$HOME/jdk21/Contents/Home" "$HOME/jdk21-home"
+            else
+              ln -sfn "$HOME/jdk21" "$HOME/jdk21-home"
+            fi
+            echo 'export JAVA_HOME="$HOME/jdk21-home"' >> "$BASH_ENV"
+            echo 'export PATH="$HOME/jdk21-home/bin:$PATH"' >> "$BASH_ENV"
+            echo "java home: $HOME/jdk21-home"
       - run:
           name: Install the NeoForge server
           no_output_timeout: 20m
           command: |
             set -euo pipefail
             source "$BASH_ENV"
-            java -version
+            which java; java -version; echo "JAVA_HOME=$JAVA_HOME"
             mkdir -p ~/n0/server && cd ~/n0/server
             echo "eula=true" > eula.txt
             INSTALLER="neoforge-${NEOFORGE_VERSION}-installer.jar"
@@ -47,9 +52,10 @@ jobs:
             source "$BASH_ENV"
             mkdir -p ~/n0/agent && cd ~/n0/agent
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n0/DumpAgent.java" .
-            printf 'Premain-Class: DumpAgent\n' > manifest.txt
+            printf 'Premain-Class: DumpAgent\nCan-Retransform-Classes: false\n' > manifest.txt
             javac -d . DumpAgent.java
             jar cfm dumpagent.jar manifest.txt DumpAgent.class
+            unzip -p dumpagent.jar META-INF/MANIFEST.MF
             ls -l
       - run:
           name: Run the server and dump every loaded class
@@ -59,8 +65,11 @@ jobs:
             source "$BASH_ENV"
             cd ~/n0/server
             mkdir -p ~/n0/dump
-            echo "-javaagent:$HOME/n0/agent/dumpagent.jar=$HOME/n0/dump" >> user_jvm_args.txt
+            # JAVA_TOOL_OPTIONS is honoured by every JVM start, including the one run.sh spawns.
+            export JAVA_TOOL_OPTIONS="-javaagent:$HOME/n0/agent/dumpagent.jar=$HOME/n0/dump -Dmixin.debug.export=true"
+            echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS"
             echo "-Dmixin.debug.export=true" >> user_jvm_args.txt
+            cat user_jvm_args.txt
             sh ./run.sh nogui > ~/n0/run.log 2>&1 &
             SERVER_PID=$!
             i=0
@@ -73,8 +82,10 @@ jobs:
             sleep 10
             kill "$SERVER_PID" 2>/dev/null || true
             wait "$SERVER_PID" 2>/dev/null || true
+            echo "dumped so far: $(find ~/n0/dump -name '*.class' | wc -l | tr -d ' ')"
             echo "---- log tail ----"
-            tail -40 ~/n0/run.log || true
+            tail -30 ~/n0/run.log || true
+            grep -m3 -i 'javaagent\|dumpagent\|Picked up JAVA_TOOL_OPTIONS' ~/n0/run.log || true
       - run:
           name: Summarise the dump
           command: |
@@ -90,6 +101,7 @@ jobs:
             tar czf n0-dump.tgz dump
             if [ -d server/.mixin.out ]; then tar czf n0-mixin.tgz -C server .mixin.out; fi
             ls -lh n0-dump.tgz n0-mixin.tgz 2>/dev/null || ls -lh n0-dump.tgz
+            if [ "$COUNT" -lt 1000 ]; then echo "FAIL: the dump is empty or truncated ($COUNT classes)"; exit 1; fi
       - store_artifacts:
           path: ~/n0/n0-dump.tgz
           destination: n0-dump.tgz
