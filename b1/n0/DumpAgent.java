@@ -1,8 +1,11 @@
 import java.io.BufferedReader;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
+import java.lang.module.ModuleDescriptor;
+import java.lang.module.ModuleReference;
+import java.lang.module.ResolvedModule;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,19 +14,20 @@ import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Optional;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 /**
  * B1 dump agent.
  *
- * <p>Phase 1 (always): write every class the JVM defines, after all transformers ran.
+ * <p>Phase 1: write every class the JVM defines, after all transformers ran.
  *
- * <p>Phase 2 (when a jar list is supplied): NeoForge only maps/renames the classes it actually
- * loads, so a dump of a server run is missing everything that was never touched. After the
- * server is up, walk the runtime classpath and force a definition of every class name through
- * the Minecraft/FML loader, so the transformers see all of them and phase 1 captures the
- * official-named result.
+ * <p>Phase 2: NeoForge only maps the classes it loads, and the on-disk jar entry names are not
+ * the runtime names (SRG vs official), so neither "loaded only" nor "enumerate jars" produces a
+ * complete graph. Instead, walk the <em>module layer</em> the game runs in: every module's
+ * reference points at the jar FML actually uses, and its own class loader knows how to define
+ * the names inside it.
  *
  * <p>Usage: {@code -javaagent:dumpagent.jar=<dumpDir>|<jarListFile>}
  */
@@ -57,38 +61,77 @@ public final class DumpAgent {
             }
         }, false);
 
-        if (parts.length == 2 && !parts[1].isEmpty()) {
-            startForcedLoader(Paths.get(parts[1]));
-        }
+        startForcedLoader(parts.length == 2 ? parts[1] : "");
     }
 
-    private static void startForcedLoader(Path jarList) {
+    private static void startForcedLoader(String jarList) {
         Thread worker = new Thread(() -> {
             try {
-                Thread.sleep(45_000L);
+                Thread.sleep(40_000L);
             } catch (InterruptedException interrupted) {
                 return;
             }
-            List<String> names = readClassNames(jarList);
-            System.err.println("[dumpagent] forcing " + names.size() + " class names from " + jarList);
 
-            ClassLoader primary = null;
+            Class<?> anchor = null;
             try {
-                primary = Class.forName("net.minecraft.SharedConstants", false,
-                        Thread.currentThread().getContextClassLoader()).getClassLoader();
+                anchor = Class.forName("net.minecraft.SharedConstants", false,
+                        Thread.currentThread().getContextClassLoader());
             } catch (Throwable ignored) {
             }
 
-            int ok = 0;
-            int fail = 0;
-            for (String name : names) {
-                if (define(name, primary) || define(name, ClassLoader.getSystemClassLoader())) {
-                    ok++;
-                } else {
-                    fail++;
+            int moduleOk = 0;
+            int moduleFail = 0;
+            ModuleLayer layer = anchor == null ? null : anchor.getModule().getLayer();
+            if (layer == null) {
+                System.err.println("[dumpagent] no module layer on the anchor class");
+            } else {
+                System.err.println("[dumpagent] module layer with " + layer.modules().size() + " modules");
+                for (Module module : layer.modules()) {
+                    Optional<ResolvedModule> resolved =
+                            layer.configuration().findModule(module.getName());
+                    if (resolved.isEmpty()) {
+                        continue;
+                    }
+                    ModuleReference reference = resolved.get().reference();
+                    Optional<URI> location = reference.location();
+                    if (location.isEmpty()) {
+                        continue;
+                    }
+                    List<String> names = namesFrom(location.get());
+                    if (names.isEmpty()) {
+                        continue;
+                    }
+                    int ok = 0;
+                    int fail = 0;
+                    ClassLoader loader = module.getClassLoader();
+                    for (String name : names) {
+                        if (define(name, loader)) {
+                            ok++;
+                        } else {
+                            fail++;
+                        }
+                    }
+                    moduleOk += ok;
+                    moduleFail += fail;
+                    System.err.println("[dumpagent] module " + module.getName() + " " + location.get()
+                            + " ok=" + ok + " fail=" + fail);
                 }
             }
-            System.err.println("[dumpagent] forced ok=" + ok + " fail=" + fail + " total=" + names.size());
+
+            int jarOk = 0;
+            int jarFail = 0;
+            if (!jarList.isEmpty()) {
+                for (String name : readClassNames(Paths.get(jarList))) {
+                    if (define(name, ClassLoader.getSystemClassLoader())) {
+                        jarOk++;
+                    } else {
+                        jarFail++;
+                    }
+                }
+            }
+
+            System.err.println("[dumpagent] forced modules ok=" + moduleOk + " fail=" + moduleFail
+                    + "; jars ok=" + jarOk + " fail=" + jarFail);
         }, "dumpagent-forced-loader");
         worker.setDaemon(true);
         worker.start();
@@ -101,6 +144,31 @@ public final class DumpAgent {
         } catch (Throwable ignored) {
             return false;
         }
+    }
+
+    private static List<String> namesFrom(URI location) {
+        List<String> names = new ArrayList<>();
+        if (!"file".equals(location.getScheme())) {
+            return names;
+        }
+        try {
+            Path path = Paths.get(location);
+            if (!Files.isRegularFile(path)) {
+                return names;
+            }
+            try (JarFile jar = new JarFile(path.toFile())) {
+                Enumeration<JarEntry> entries = jar.entries();
+                while (entries.hasMoreElements()) {
+                    String entry = entries.nextElement().getName();
+                    if (entry.endsWith(".class") && !entry.startsWith("META-INF/")
+                            && !entry.startsWith("module-info")) {
+                        names.add(entry.substring(0, entry.length() - 6).replace('/', '.'));
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return names;
     }
 
     private static List<String> readClassNames(Path jarList) {
@@ -120,10 +188,10 @@ public final class DumpAgent {
                     Enumeration<JarEntry> entries = file.entries();
                     while (entries.hasMoreElements()) {
                         String entry = entries.nextElement().getName();
-                        if (!entry.endsWith(".class") || entry.startsWith("META-INF/")) {
-                            continue;
+                        if (entry.endsWith(".class") && !entry.startsWith("META-INF/")
+                                && !entry.startsWith("module-info")) {
+                            names.add(entry.substring(0, entry.length() - 6).replace('/', '.'));
                         }
-                        names.add(entry.substring(0, entry.length() - 6).replace('/', '.'));
                     }
                 } catch (Exception ignored) {
                 }
