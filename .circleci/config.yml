@@ -54,9 +54,8 @@ jobs:
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n0/DumpAgent.java" .
             printf 'Premain-Class: DumpAgent\nCan-Retransform-Classes: false\n' > manifest.txt
             javac -d . DumpAgent.java
-            jar cfm dumpagent.jar manifest.txt DumpAgent.class
-            unzip -p dumpagent.jar META-INF/MANIFEST.MF
-            ls -l
+            jar cfm dumpagent.jar manifest.txt ./*.class
+            unzip -l dumpagent.jar
       - run:
           name: Run the server and dump every loaded class
           no_output_timeout: 20m
