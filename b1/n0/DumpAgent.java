@@ -1,12 +1,14 @@
 import java.io.BufferedReader;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
-import java.lang.reflect.Method;
 import java.lang.module.ModuleReference;
 import java.lang.module.ResolvedModule;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.jar.JarEntry;
@@ -26,17 +29,20 @@ import java.util.jar.JarFile;
  *
  * <p>Phase 1: write every class the JVM defines, after all transformers ran.
  *
- * <p>Phase 2: force-define the full runtime class set so phase 1 can capture it. The game runs
- * in an <em>unnamed</em> module, so {@code ModuleLayer} is useless here; instead we ask the
- * loader that owns a real game class for its roots (URLClassLoader or a reflective
- * {@code getURLs()}), because those roots are the jars FML actually reads after remapping.
+ * <p>Phase 2: force-define the full runtime class set. The game lives in an unnamed module,
+ * so ModuleLayer is useless, and jar entry names are SRG while runtime names are official.
+ * The anchor therefore has to come from the Instrumentation instance: find a class that is
+ * already loaded (sanely named {@code net.minecraft.*}), take its loader, and read the module
+ * table that loader keeps — those ModuleReferences point at the jars FML actually uses.
  *
  * <p>Usage: {@code -javaagent:dumpagent.jar=<dumpDir>|<jarListFile>}
  */
 public final class DumpAgent {
     private static Path root;
+    private static Instrumentation instrumentation;
 
     public static void premain(String args, Instrumentation inst) throws Exception {
+        instrumentation = inst;
         String spec = args == null ? "" : args;
         String[] parts = spec.split("\\|", 2);
         root = Paths.get(parts[0].isEmpty() ? "classdump" : parts[0]);
@@ -73,34 +79,36 @@ public final class DumpAgent {
                 return;
             }
 
-            Class<?> anchor = null;
-            try {
-                anchor = Class.forName("net.minecraft.SharedConstants", false,
-                        Thread.currentThread().getContextClassLoader());
-            } catch (Throwable ignored) {
+            Class<?> anchor = findLoadedAnchor();
+            if (anchor == null) {
+                System.err.println("[dumpagent] no loaded net.minecraft.* class to anchor on");
+                return;
             }
-
-            ClassLoader loader = anchor == null ? null : anchor.getClassLoader();
-            System.err.println("[dumpagent] anchor loader = "
-                    + (loader == null ? "bootstrap" : loader.getClass().getName())
-                    + "; module = " + (anchor == null ? "?" : anchor.getModule().getName()));
+            ClassLoader loader = anchor.getClassLoader();
+            System.err.println("[dumpagent] anchor=" + anchor.getName()
+                    + " loader=" + (loader == null ? "bootstrap" : loader.getClass().getName())
+                    + " module=" + anchor.getModule().getName()
+                    + " layer=" + (anchor.getModule().getLayer() == null ? "none" : "present"));
 
             Set<Path> roots = new LinkedHashSet<>();
-            collectRoots(loader, roots);
-            collectModuleRoots(anchor, roots);
+            collectLoaderRoots(loader, roots);
+            collectModuleClassLoaderRoots(loader, roots);
+            if (anchor.getModule().getLayer() != null) {
+                collectLayerRoots(anchor, roots);
+            }
             System.err.println("[dumpagent] runtime roots: " + roots.size());
 
             int ok = 0;
             int fail = 0;
             for (Path candidate : roots) {
-                List<String> names = namesFrom(candidate, loader);
+                List<String> names = namesFrom(candidate);
                 if (names.isEmpty()) {
                     continue;
                 }
                 int rootOk = 0;
                 int rootFail = 0;
                 for (String name : names) {
-                    if (define(name, loader)) {
+                    if (define(name, loader) || define(name, ClassLoader.getSystemClassLoader())) {
                         rootOk++;
                     } else {
                         rootFail++;
@@ -115,7 +123,7 @@ public final class DumpAgent {
             int jarFail = 0;
             if (!jarList.isEmpty()) {
                 for (String name : readClassNames(Paths.get(jarList))) {
-                    if (define(name, loader) || define(name, ClassLoader.getSystemClassLoader())) {
+                    if (define(name, ClassLoader.getSystemClassLoader())) {
                         jarOk++;
                     } else {
                         jarFail++;
@@ -129,8 +137,28 @@ public final class DumpAgent {
         worker.start();
     }
 
-    /** Collects the class path roots of a loader chain, including a reflective getURLs(). */
-    private static void collectRoots(ClassLoader loader, Set<Path> roots) {
+    /** Finds a loaded game class through the instrumentation, not through a thread context loader. */
+    private static Class<?> findLoadedAnchor() {
+        Class<?> fallback = null;
+        for (Class<?> loaded : instrumentation.getAllLoadedClasses()) {
+            String name = loaded.getName();
+            if (!name.startsWith("net.minecraft.")) {
+                continue;
+            }
+            if (loaded.getClassLoader() == null) {
+                continue;
+            }
+            if (name.equals("net.minecraft.SharedConstants")) {
+                return loaded;
+            }
+            if (fallback == null && name.contains(".")) {
+                fallback = loaded;
+            }
+        }
+        return fallback;
+    }
+
+    private static void collectLoaderRoots(ClassLoader loader, Set<Path> roots) {
         ClassLoader current = loader;
         while (current != null) {
             URL[] urls = null;
@@ -151,53 +179,81 @@ public final class DumpAgent {
                     addRoot(url, roots);
                 }
             }
-            try {
-                String field = null;
-                for (String candidate : new String[]{"ucp", "path", "urls"}) {
-                    try {
-                        current.getClass().getDeclaredField(candidate);
-                        field = candidate;
-                        break;
-                    } catch (NoSuchFieldException ignored) {
-                    }
-                }
-                if (field != null) {
-                    var declared = current.getClass().getDeclaredField(field);
-                    declared.setAccessible(true);
-                    Object value = declared.get(current);
-                    if (value != null && value.getClass().getName().contains("URLClassPath")) {
-                        Method getUrls = value.getClass().getMethod("getURLs");
-                        for (Object url : (Object[]) getUrls.invoke(value)) {
-                            addRoot((URL) url, roots);
-                        }
-                    }
-                }
-            } catch (Throwable ignored) {
-            }
             current = current.getParent();
         }
     }
 
-    private static void collectModuleRoots(Class<?> anchor, Set<Path> roots) {
-        if (anchor == null || anchor.getModule().getLayer() == null) {
+    /** Reads whatever map of ModuleReference / Module the loader keeps. */
+    private static void collectModuleClassLoaderRoots(ClassLoader loader, Set<Path> roots) {
+        if (loader == null) {
             return;
         }
-        var layer = anchor.getModule().getLayer();
-        for (var module : layer.modules()) {
-            Optional<ResolvedModule> resolved = layer.configuration().findModule(module.getName());
-            if (resolved.isEmpty()) {
-                continue;
+        Class<?> type = loader.getClass();
+        while (type != null) {
+            for (Field field : type.getDeclaredFields()) {
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(loader);
+                    if (value instanceof Map<?, ?> map) {
+                        for (Object entry : map.values()) {
+                            if (entry instanceof ModuleReference reference) {
+                                reference.location().ifPresent(uri -> addLocation(uri, roots));
+                            } else if (entry instanceof java.lang.Module module) {
+                                collectLayerRootsForModule(module, roots);
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
             }
-            ModuleReference reference = resolved.get().reference();
-            reference.location().ifPresent(uri -> addRoot(uriToUrl(uri), roots));
+            type = type.getSuperclass();
         }
     }
 
-    private static URL uriToUrl(URI uri) {
+    private static void collectLayerRoots(Class<?> anchor, Set<Path> roots) {
+        var layer = anchor.getModule().getLayer();
+        if (layer == null) {
+            return;
+        }
+        for (var module : layer.modules()) {
+            Optional<ResolvedModule> resolved = layer.configuration().findModule(module.getName());
+            resolved.ifPresent(value -> value.reference().location()
+                    .ifPresent(uri -> addLocation(uri, roots)));
+        }
+    }
+
+    private static void collectLayerRootsForModule(java.lang.Module module, Set<Path> roots) {
+        var layer = module.getLayer();
+        if (layer == null) {
+            return;
+        }
+        var configuration = layer.configuration();
+        configuration.findModule(module.getName()).ifPresent(value ->
+                value.reference().location().ifPresent(uri -> addLocation(uri, roots)));
+    }
+
+    /** Handles file: as well as FML's union:&lt;jar&gt;%23&lt;n&gt;!/ locations. */
+    private static void addLocation(URI uri, Set<Path> roots) {
+        String text = uri.toString();
+        if (text.startsWith("union:")) {
+            text = text.substring("union:".length());
+        }
+        int bang = text.indexOf('!');
+        if (bang >= 0) {
+            text = text.substring(0, bang);
+        }
+        for (String marker : new String[]{"%23", "#"}) {
+            int index = text.indexOf(marker);
+            if (index >= 0) {
+                text = text.substring(0, index);
+            }
+        }
         try {
-            return uri.getScheme().equals("file") ? uri.toURL() : null;
+            Path path = Paths.get(URLDecoder.decode(text, StandardCharsets.UTF_8));
+            if (Files.exists(path)) {
+                roots.add(path);
+            }
         } catch (Exception ignored) {
-            return null;
         }
     }
 
@@ -223,7 +279,7 @@ public final class DumpAgent {
         }
     }
 
-    private static List<String> namesFrom(Path path, ClassLoader loader) {
+    private static List<String> namesFrom(Path path) {
         List<String> names = new ArrayList<>();
         try {
             if (Files.isDirectory(path)) {
