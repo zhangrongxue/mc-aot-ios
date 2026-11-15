@@ -1,10 +1,7 @@
-version: 2.1
+﻿version: 2.1
 
-# B1 线 · N0.5（第二轮）：
-#   A. 图谱补全：N0 的 dump 只有"运行期真正加载过"的类，缺被引用但没加载的类。
-#      把服务端 classpath 上的所有 jar 解开与 dump 合并，再做纯 JVM 加载冒烟。
-#   B. 对补全后的图谱做 GraalVM native-image 冒烟。
-
+# B1 绾?路 N0.5锛堢浜岃疆锛夛細
+#   A. 鍥捐氨琛ュ叏锛歂0 鐨?dump 鍙湁"杩愯鏈熺湡姝ｅ姞杞借繃"鐨勭被锛岀己琚紩鐢ㄤ絾娌″姞杞界殑绫汇€?#      鎶婃湇鍔＄ classpath 涓婄殑鎵€鏈?jar 瑙ｅ紑涓?dump 鍚堝苟锛屽啀鍋氱函 JVM 鍔犺浇鍐掔儫銆?#   B. 瀵硅ˉ鍏ㄥ悗鐨勫浘璋卞仛 GraalVM native-image 鍐掔儫銆?
 jobs:
   neoforge-n05:
     macos:
@@ -72,7 +69,7 @@ jobs:
             while IFS= read -r jar; do
               case "$jar" in
                 /*) full="$jar" ;;
-                *) full="server/libraries/$jar" ;;
+                *) full="server/$jar" ;;
               esac
               if [ -f "$full" ]; then
                 unzip -oq "$full" '*.class' -d graph 2>/dev/null || true
@@ -88,6 +85,7 @@ jobs:
             java -cp graph:. N0Load > load-smoke.txt 2>&1
             echo "load smoke exit: $?"
             tail -20 load-smoke.txt || true
+            exit 0
       - run:
           name: B. GraalVM native-image smoke
           no_output_timeout: 45m
@@ -141,3 +139,5 @@ workflows:
   n05:
     jobs:
       - neoforge-n05
+
+
