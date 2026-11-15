@@ -65,13 +65,21 @@ def library_path(root, library):
 def build_classpath(root, libraries):
     entries = []
     missing = []
+    seen = set()
     for library in libraries or []:
         if not rules_allow(library.get("rules")):
             continue
         path = library_path(root, library)
-        if path and os.path.isfile(path):
+        if not path:
+            continue
+        # The parent json and the NeoForge json both list some libraries; a duplicate makes
+        # securejarhandler's union filesystem throw "Duplicate key".
+        if path in seen:
+            continue
+        if os.path.isfile(path):
+            seen.add(path)
             entries.append(path)
-        elif path:
+        else:
             missing.append(path)
     return entries, missing
 
