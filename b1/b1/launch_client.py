@@ -76,6 +76,36 @@ def build_classpath(root, libraries):
     return entries, missing
 
 
+def download_missing(root, libraries):
+    """A real launcher fetches whatever the version json lists; the installer does not."""
+    import urllib.request
+
+    downloaded = 0
+    failed = 0
+    for library in libraries or []:
+        if not rules_allow(library.get("rules")):
+            continue
+        artifact = ((library.get("downloads") or {}).get("artifact") or {})
+        url = artifact.get("url")
+        path_value = artifact.get("path")
+        if not url or not path_value:
+            continue
+        target = os.path.join(root, "libraries", path_value)
+        if os.path.isfile(target):
+            continue
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            temporary = target + ".part"
+            with urllib.request.urlopen(url, timeout=120) as response, open(temporary, "wb") as handle:
+                handle.write(response.read())
+            os.replace(temporary, target)
+            downloaded += 1
+        except Exception as error:  # noqa: BLE001 - reported as a count
+            failed += 1
+            print("download failed:", path_value, error)
+    print("downloaded", downloaded, "library artifacts, failed", failed)
+
+
 def placeholder_map(root, version_id, version_json):
     natives = os.path.join(root, "natives")
     os.makedirs(natives, exist_ok=True)
@@ -212,6 +242,8 @@ def main():
             print("merged with parent version", parent_id)
         else:
             print("WARNING: parent version", parent_id, "is unavailable; args will be incomplete")
+
+    download_missing(args.root, data.get("libraries"))
 
     mapping, classpath_entries, classpath_missing = placeholder_map(args.root, version_id, data)
 
