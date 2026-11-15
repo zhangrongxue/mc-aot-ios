@@ -1,14 +1,12 @@
 version: 2.1
 
-# B1 line - N0.5 (fourth round): module-layer enumeration + always-run native-image
-#   Phase 1 showed the dump only contains classes that were actually loaded, and NeoForge
-#   maps classes to official names at runtime, so the on-disk jars cannot fill the gaps.
-#   The agent now force-defines every class name on the runtime classpath after startup
-#   (Class.forName with initialize=false) so the transformers see all of them.
-#   Then: A. plain-JVM load smoke   B. native-image smoke.
+# B1 line - client-side graph
+#   Installs the NeoForge *client* and runs it briefly on the macOS runner with the dump agent
+#   (forced-load delay shortened to 12 s so it fires before the game finishes booting).
+#   Goal: capture net/minecraft/client/** classes, which the server install never has.
 
 jobs:
-  neoforge-n05:
+  b1-client:
     macos:
       xcode: 27.1.0
     resource_class: m4pro.medium
@@ -27,125 +25,83 @@ jobs:
             echo 'export JAVA_HOME="$HOME/jdk21-home"' >> "$BASH_ENV"
             echo 'export PATH="$HOME/jdk21-home/bin:$PATH"' >> "$BASH_ENV"
       - run:
-          name: NeoForge server + forced full dump
+          name: Install the NeoForge client
           no_output_timeout: 30m
           command: |
             set -euo pipefail
             source "$BASH_ENV"
             which java; java -version
-            mkdir -p ~/n0/server ~/n0/agent ~/n0/dump && cd ~/n0/server
-            echo "eula=true" > eula.txt
+            mkdir -p ~/b1/client ~/b1/agent ~/b1/dump && cd ~/b1/client
+            echo '{"profiles":{}}' > launcher_profiles.json
             curl -fsSL -o neoforge-installer.jar "https://maven.neoforged.net/releases/net/neoforged/neoforge/${NEOFORGE_VERSION}/neoforge-${NEOFORGE_VERSION}-installer.jar"
-            java -jar neoforge-installer.jar --installServer .
-            ARGS_FILE=$(find libraries -name unix_args.txt | head -1)
-            echo "classpath file: $ARGS_FILE"
-            grep -oE '(/|[A-Za-z0-9_.-])[^:[:space:]]*\.jar' "$ARGS_FILE" | sort -u > ~/n0/jars-rel.txt
-            : > ~/n0/jars.txt
-            while IFS= read -r jar; do
-              case "$jar" in
-                /*) echo "$jar" >> ~/n0/jars.txt ;;
-                *) echo "$HOME/n0/server/$jar" >> ~/n0/jars.txt ;;
-              esac
-            done < ~/n0/jars-rel.txt
-            echo "jars: $(wc -l < ~/n0/jars.txt | tr -d ' ')"
-            cd ~/n0/agent
+            java -jar neoforge-installer.jar --installClient .
+            ls -la
+      - run:
+          name: Build the dump agent
+          command: |
+            set -euo pipefail
+            source "$BASH_ENV"
+            cd ~/b1/agent
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n0/DumpAgent.java" .
-            javac -d . DumpAgent.java
+            javac -encoding UTF-8 -d . DumpAgent.java
             printf 'Premain-Class: DumpAgent\n' > manifest.txt
             jar cfm dumpagent.jar manifest.txt ./*.class
-            cd ~/n0/server
-            export JAVA_TOOL_OPTIONS="-javaagent:$HOME/n0/agent/dumpagent.jar=$HOME/n0/dump|$HOME/n0/jars.txt"
-            echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS"
-            sh ./run.sh nogui > ~/n0/run.log 2>&1 &
-            SERVER_PID=$!
-            i=0
-            while [ "$i" -lt 60 ]; do
-              i=$((i + 1))
-              if grep -q 'Done (' ~/n0/run.log 2>/dev/null; then echo "server Done at $((i*5))s"; break; fi
-              if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "server exited early"; break; fi
-              sleep 5
-            done
-            j=0
-            while [ "$j" -lt 40 ]; do
-              j=$((j + 1))
-              if grep -q 'forced ok=' ~/n0/run.log 2>/dev/null; then break; fi
-              sleep 5
-            done
-            sleep 5
-            kill "$SERVER_PID" 2>/dev/null || true
-            wait "$SERVER_PID" 2>/dev/null || true
-            grep 'forced ok=' ~/n0/run.log || echo "forced-loader line not found"
-            echo "classes dumped: $(find ~/n0/dump -name '*.class' | wc -l | tr -d ' ')"
+            ls -l
       - run:
-          name: A. plain-JVM load of the forced dump
-          command: |
-            set -u
-            source "$BASH_ENV"
-            cd ~/n0
-            cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/N0Load.java" .
-            javac -cp dump -d . N0Load.java || echo "javac failed"
-            java -cp dump:. N0Load > load-smoke.txt 2>&1
-            echo "load smoke exit: $?"
-            tail -20 load-smoke.txt || true
-            exit 0
-      - run:
-          name: B. GraalVM native-image smoke
-          when: always
-          no_output_timeout: 45m
+          name: Run the client briefly and dump
+          no_output_timeout: 20m
           command: |
             set -uo pipefail
             source "$BASH_ENV"
-            cd "$HOME"
-            curl -fsSL -o graalvm.tar.gz "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-21.0.2/graalvm-community-jdk-21.0.2_macos-aarch64_bin.tar.gz"
-            mkdir -p graalvm && tar xzf graalvm.tar.gz -C graalvm --strip-components=1
-            GRAAL_HOME="$HOME/graalvm/Contents/Home"
-            [ -x "$GRAAL_HOME/bin/native-image" ] || GRAAL_HOME="$HOME/graalvm"
-            echo "graal home: $GRAAL_HOME"
-            "$GRAAL_HOME/bin/native-image" --version || true
-            cd ~/n0
-            cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/N0Smoke.java" .
-            # A directory on the classpath makes GraalVM's Log4ShellFeature fail when it opens a
-            # classpath entry as a file system, so hand it a jar instead.
-            jar cf graph.jar -C dump .
-            "$GRAAL_HOME/bin/javac" -cp graph.jar -d . N0Smoke.java || echo "javac failed"
-            ( "$GRAAL_HOME/bin/native-image" -cp "graph.jar:." -H:+ReportExceptionStackTraces \
-                -J-Xmx6g --no-fallback -o n0smoke N0Smoke > native-image.log 2>&1 ) &
-            NI_PID=$!
+            cd ~/b1/client
+            ARGS_FILE=$(find libraries -name unix_args.txt | head -1)
+            echo "classpath file: $ARGS_FILE"
+            if [ -z "$ARGS_FILE" ]; then echo "client args not found"; ls -R | head -40; exit 0; fi
+            grep -oE '(/|[A-Za-z0-9_.-])[^:[:space:]]*\.jar' "$ARGS_FILE" | sort -u > ~/b1/jars-rel.txt
+            : > ~/b1/jars.txt
+            while IFS= read -r jar; do
+              case "$jar" in /*) echo "$jar" >> ~/b1/jars.txt ;; *) echo "$HOME/b1/client/$jar" >> ~/b1/jars.txt ;; esac
+            done < ~/b1/jars-rel.txt
+            echo "jars: $(wc -l < ~/b1/jars.txt | tr -d ' ')"
+            export JAVA_TOOL_OPTIONS="-javaagent:$HOME/b1/agent/dumpagent.jar=$HOME/b1/dump|$HOME/b1/jars.txt|12000"
+            echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS"
+            sh ./run.sh --username Dev --version 1.21.1 --gameDir "$HOME/b1/client/game" --assetsDir "$HOME/b1/client/assets" --assetIndex 17 --uuid 00000000000000000000000000000000 --accessToken 0 --userType legacy --versionType release > ~/b1/run.log 2>&1 &
+            CLIENT_PID=$!
             i=0
-            while [ "$i" -lt 180 ]; do
+            while [ "$i" -lt 36 ]; do
               i=$((i + 1))
-              if ! kill -0 "$NI_PID" 2>/dev/null; then break; fi
-              sleep 10
+              if grep -q 'forced ok=' ~/b1/run.log 2>/dev/null; then echo "forced loader done at $((i*5))s"; break; fi
+              if ! kill -0 "$CLIENT_PID" 2>/dev/null; then echo "client exited at $((i*5))s"; break; fi
+              sleep 5
             done
-            if kill -0 "$NI_PID" 2>/dev/null; then echo "native-image still running after 30 min, killing"; kill "$NI_PID" 2>/dev/null; fi
-            wait "$NI_PID" 2>/dev/null
-            echo "---- last 50 lines ----"
-            tail -50 native-image.log || true
-            echo "---- error summary ----"
-            grep -E '^Error|Caused by|UnsupportedFeature|not reachable|NoClassDefFound' native-image.log | head -40 || true
-            if [ -x n0smoke ]; then echo "IMAGE BUILT: $(ls -lh n0smoke | awk '{print $5}')"; ./n0smoke || true; else echo "IMAGE NOT BUILT"; fi
+            sleep 5
+            kill "$CLIENT_PID" 2>/dev/null || true
+            wait "$CLIENT_PID" 2>/dev/null || true
+            grep 'forced ok=' ~/b1/run.log || echo "forced-loader line not found"
+            echo "classes dumped: $(find ~/b1/dump -name '*.class' | wc -l | tr -d ' ')"
+            echo "client classes: $(find ~/b1/dump -path '*net/minecraft/client/*' -name '*.class' | wc -l | tr -d ' ')"
+            tail -20 ~/b1/run.log || true
       - run:
-          name: Package the smoke evidence
+          name: A. plain-JVM load smoke for client classes
           when: always
           command: |
-            cd ~/n0
-            tar czf n05-smoke.tgz load-smoke.txt native-image.log 2>/dev/null || true
-            ls -lh n05-smoke.tgz || true
+            set -u
+            source "$BASH_ENV"
+            cd ~/b1
+            cp "$CIRCLE_WORKING_DIRECTORY/b1/b1/ClientLoad.java" .
+            javac -d . ClientLoad.java || echo "javac failed"
+            java -cp "dump:." ClientLoad > client-load.txt 2>&1
+            echo "exit: $?"
+            cat client-load.txt
+            exit 0
       - store_artifacts:
-          path: ~/n0/n05-smoke.tgz
-          destination: n05-smoke.tgz
+          path: ~/b1/run.log
+          destination: b1-client-run.log
       - store_artifacts:
-          path: ~/n0/load-smoke.txt
-          destination: load-smoke.txt
-      - store_artifacts:
-          path: ~/n0/native-image.log
-          destination: native-image.log
-      - store_artifacts:
-          path: ~/n0/run.log
-          destination: run.log
+          path: ~/b1/client-load.txt
+          destination: b1-client-load.txt
 
 workflows:
-  n05:
+  b1client:
     jobs:
-      - neoforge-n05
-
+      - b1-client
