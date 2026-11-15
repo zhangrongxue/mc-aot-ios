@@ -123,7 +123,7 @@ public final class DumpAgent {
             int jarFail = 0;
             if (!jarList.isEmpty()) {
                 for (String name : readClassNames(Paths.get(jarList))) {
-                    if (define(name, ClassLoader.getSystemClassLoader())) {
+                    if (define(name, loader) || define(name, ClassLoader.getSystemClassLoader())) {
                         jarOk++;
                     } else {
                         jarFail++;
