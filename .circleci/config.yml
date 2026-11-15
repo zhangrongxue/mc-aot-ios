@@ -104,8 +104,11 @@ jobs:
             "$GRAAL_HOME/bin/native-image" --version || true
             cd ~/n0
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/N0Smoke.java" .
-            "$GRAAL_HOME/bin/javac" -cp dump -d . N0Smoke.java || echo "javac failed"
-            ( "$GRAAL_HOME/bin/native-image" -cp "dump:." -H:+ReportExceptionStackTraces \
+            # A directory on the classpath makes GraalVM's Log4ShellFeature fail when it opens a
+            # classpath entry as a file system, so hand it a jar instead.
+            jar cf graph.jar -C dump .
+            "$GRAAL_HOME/bin/javac" -cp graph.jar -d . N0Smoke.java || echo "javac failed"
+            ( "$GRAAL_HOME/bin/native-image" -cp "graph.jar:." -H:+ReportExceptionStackTraces \
                 -J-Xmx6g --no-fallback -o n0smoke N0Smoke > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
