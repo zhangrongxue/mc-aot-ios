@@ -71,17 +71,26 @@ public final class DumpAgent {
         startForcedLoader(parts.length >= 2 ? parts[1] : "", parts.length >= 3 ? Long.parseLong(parts[2].trim()) : 40_000L);
     }
 
-    private static void startForcedLoader(String jarList, long delayMs) {
+    private static void startForcedLoader(String jarList, long waitMs) {
         Thread worker = new Thread(() -> {
-            try {
-                Thread.sleep(delayMs);
-            } catch (InterruptedException interrupted) {
-                return;
+            /* The client needs longer than the server to load its first net.minecraft class, so
+               the agent polls instead of sleeping a fixed amount. */
+            long deadline = System.currentTimeMillis() + Math.max(waitMs, 30_000L);
+            Class<?> anchor = null;
+            while (System.currentTimeMillis() < deadline) {
+                anchor = findLoadedAnchor();
+                if (anchor != null) {
+                    break;
+                }
+                try {
+                    Thread.sleep(2_000L);
+                } catch (InterruptedException interrupted) {
+                    return;
+                }
             }
-
-            Class<?> anchor = findLoadedAnchor();
             if (anchor == null) {
-                System.err.println("[dumpagent] no loaded net.minecraft.* class to anchor on");
+                System.err.println("[dumpagent] no loaded net.minecraft.* class to anchor on after "
+                        + waitMs + " ms");
                 return;
             }
             ClassLoader loader = anchor.getClassLoader();
