@@ -1,7 +1,12 @@
-﻿version: 2.1
+version: 2.1
 
-# B1 绾?路 N0.5锛堢浜岃疆锛夛細
-#   A. 鍥捐氨琛ュ叏锛歂0 鐨?dump 鍙湁"杩愯鏈熺湡姝ｅ姞杞借繃"鐨勭被锛岀己琚紩鐢ㄤ絾娌″姞杞界殑绫汇€?#      鎶婃湇鍔＄ classpath 涓婄殑鎵€鏈?jar 瑙ｅ紑涓?dump 鍚堝苟锛屽啀鍋氱函 JVM 鍔犺浇鍐掔儫銆?#   B. 瀵硅ˉ鍏ㄥ悗鐨勫浘璋卞仛 GraalVM native-image 鍐掔儫銆?
+# B1 line - N0.5 (third round): forced full load
+#   Phase 1 showed the dump only contains classes that were actually loaded, and NeoForge
+#   maps classes to official names at runtime, so the on-disk jars cannot fill the gaps.
+#   The agent now force-defines every class name on the runtime classpath after startup
+#   (Class.forName with initialize=false) so the transformers see all of them.
+#   Then: A. plain-JVM load smoke   B. native-image smoke.
+
 jobs:
   neoforge-n05:
     macos:
@@ -22,8 +27,8 @@ jobs:
             echo 'export JAVA_HOME="$HOME/jdk21-home"' >> "$BASH_ENV"
             echo 'export PATH="$HOME/jdk21-home/bin:$PATH"' >> "$BASH_ENV"
       - run:
-          name: NeoForge server + class dump
-          no_output_timeout: 20m
+          name: NeoForge server + forced full dump
+          no_output_timeout: 30m
           command: |
             set -euo pipefail
             source "$BASH_ENV"
@@ -32,13 +37,25 @@ jobs:
             echo "eula=true" > eula.txt
             curl -fsSL -o neoforge-installer.jar "https://maven.neoforged.net/releases/net/neoforged/neoforge/${NEOFORGE_VERSION}/neoforge-${NEOFORGE_VERSION}-installer.jar"
             java -jar neoforge-installer.jar --installServer .
+            ARGS_FILE=$(find libraries -name unix_args.txt | head -1)
+            echo "classpath file: $ARGS_FILE"
+            grep -oE '(/|[A-Za-z0-9_.-])[^:[:space:]]*\.jar' "$ARGS_FILE" | sort -u > ~/n0/jars-rel.txt
+            : > ~/n0/jars.txt
+            while IFS= read -r jar; do
+              case "$jar" in
+                /*) echo "$jar" >> ~/n0/jars.txt ;;
+                *) echo "$HOME/n0/server/$jar" >> ~/n0/jars.txt ;;
+              esac
+            done < ~/n0/jars-rel.txt
+            echo "jars: $(wc -l < ~/n0/jars.txt | tr -d ' ')"
             cd ~/n0/agent
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n0/DumpAgent.java" .
             javac -d . DumpAgent.java
             printf 'Premain-Class: DumpAgent\n' > manifest.txt
             jar cfm dumpagent.jar manifest.txt ./*.class
             cd ~/n0/server
-            export JAVA_TOOL_OPTIONS="-javaagent:$HOME/n0/agent/dumpagent.jar=$HOME/n0/dump"
+            export JAVA_TOOL_OPTIONS="-javaagent:$HOME/n0/agent/dumpagent.jar=$HOME/n0/dump|$HOME/n0/jars.txt"
+            echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS"
             sh ./run.sh nogui > ~/n0/run.log 2>&1 &
             SERVER_PID=$!
             i=0
@@ -48,41 +65,26 @@ jobs:
               if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "server exited early"; break; fi
               sleep 5
             done
-            sleep 10
+            j=0
+            while [ "$j" -lt 40 ]; do
+              j=$((j + 1))
+              if grep -q 'forced ok=' ~/n0/run.log 2>/dev/null; then break; fi
+              sleep 5
+            done
+            sleep 5
             kill "$SERVER_PID" 2>/dev/null || true
             wait "$SERVER_PID" 2>/dev/null || true
+            grep 'forced ok=' ~/n0/run.log || echo "forced-loader line not found"
             echo "classes dumped: $(find ~/n0/dump -name '*.class' | wc -l | tr -d ' ')"
       - run:
-          name: A. complete the graph and load it without ModLauncher
+          name: A. plain-JVM load of the forced dump
           command: |
             set -u
             source "$BASH_ENV"
             cd ~/n0
-            ARGS_FILE=$(find server/libraries -name unix_args.txt | head -1)
-            echo "classpath file: $ARGS_FILE"
-            echo "---- head of args ----"
-            head -c 400 "$ARGS_FILE" || true
-            echo
-            grep -oE '(/|[A-Za-z0-9_.-])[^:[:space:]]*\.jar' "$ARGS_FILE" | sort -u > jars.txt || true
-            echo "jars listed: $(wc -l < jars.txt | tr -d ' ')"
-            mkdir -p graph
-            while IFS= read -r jar; do
-              case "$jar" in
-                /*) full="$jar" ;;
-                *) full="server/$jar" ;;
-              esac
-              if [ -f "$full" ]; then
-                unzip -oq "$full" '*.class' -d graph 2>/dev/null || true
-              else
-                echo "missing jar: $full"
-              fi
-            done < jars.txt
-            echo "library classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
-            cp -R dump/. graph/ 2>/dev/null || true
-            echo "graph total: $(find graph -name '*.class' | wc -l | tr -d ' ')"
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/N0Load.java" .
-            javac -cp graph -d . N0Load.java || echo "javac failed"
-            java -cp graph:. N0Load > load-smoke.txt 2>&1
+            javac -cp dump -d . N0Load.java || echo "javac failed"
+            java -cp dump:. N0Load > load-smoke.txt 2>&1
             echo "load smoke exit: $?"
             tail -20 load-smoke.txt || true
             exit 0
@@ -101,8 +103,8 @@ jobs:
             "$GRAAL_HOME/bin/native-image" --version || true
             cd ~/n0
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/N0Smoke.java" .
-            "$GRAAL_HOME/bin/javac" -cp graph -d . N0Smoke.java || echo "javac failed"
-            ( "$GRAAL_HOME/bin/native-image" -cp "graph:." -H:+ReportExceptionStackTraces \
+            "$GRAAL_HOME/bin/javac" -cp dump -d . N0Smoke.java || echo "javac failed"
+            ( "$GRAAL_HOME/bin/native-image" -cp "dump:." -H:+ReportExceptionStackTraces \
                 -J-Xmx6g --no-fallback -o n0smoke N0Smoke > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
@@ -134,10 +136,11 @@ jobs:
       - store_artifacts:
           path: ~/n0/native-image.log
           destination: native-image.log
+      - store_artifacts:
+          path: ~/n0/run.log
+          destination: run.log
 
 workflows:
   n05:
     jobs:
       - neoforge-n05
-
-
