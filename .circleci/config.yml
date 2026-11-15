@@ -90,6 +90,7 @@ jobs:
             exit 0
       - run:
           name: B. GraalVM native-image smoke
+          when: always
           no_output_timeout: 45m
           command: |
             set -uo pipefail
