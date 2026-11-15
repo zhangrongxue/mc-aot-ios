@@ -1,6 +1,6 @@
 version: 2.1
 
-# B1 line - N0.5 (third round): forced full load
+# B1 line - N0.5 (fourth round): module-layer enumeration + always-run native-image
 #   Phase 1 showed the dump only contains classes that were actually loaded, and NeoForge
 #   maps classes to official names at runtime, so the on-disk jars cannot fill the gaps.
 #   The agent now force-defines every class name on the runtime classpath after startup
@@ -145,3 +145,4 @@ workflows:
   n05:
     jobs:
       - neoforge-n05
+
