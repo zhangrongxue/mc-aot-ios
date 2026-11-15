@@ -1,9 +1,9 @@
 version: 2.1
 
-# B1 线 · N0.5：把 N0 导出的类图谱脱离 ModLauncher 做两项冒烟
-#   A. 纯 JVM：直接 classpath 加载关键类，验证图谱自洽（不启动 FML）
-#   B. GraalVM native-image：封闭世界分析能否吃掉这份图谱
-# A 失败 = 类图谱不自洽；B 失败 = 需要补反射/资源/初始化配置（输出就是 N1 的工作清单）。
+# B1 线 · N0.5（第二轮）：
+#   A. 图谱补全：N0 的 dump 只有"运行期真正加载过"的类，缺被引用但没加载的类。
+#      把服务端 classpath 上的所有 jar 解开与 dump 合并，再做纯 JVM 加载冒烟。
+#   B. 对补全后的图谱做 GraalVM native-image 冒烟。
 
 jobs:
   neoforge-n05:
@@ -56,14 +56,25 @@ jobs:
             wait "$SERVER_PID" 2>/dev/null || true
             echo "classes dumped: $(find ~/n0/dump -name '*.class' | wc -l | tr -d ' ')"
       - run:
-          name: A. plain-JVM class load without ModLauncher
+          name: A. complete the graph and load it without ModLauncher
           command: |
-            set -euo pipefail
+            set -uo pipefail
             source "$BASH_ENV"
             cd ~/n0
+            mkdir -p graph
+            ARGS_FILE=$(find server/libraries -name unix_args.txt | head -1)
+            echo "classpath file: $ARGS_FILE"
+            grep -o '[^ :]*\.jar' "$ARGS_FILE" 2>/dev/null | while read -r jar; do
+              case "$jar" in /*) full="$jar";; *) full="server/libraries/$jar";; esac
+              [ -f "$full" ] && unzip -oq "$full" -d graph -x 'META-INF/*' 'module-info.class' 2>/dev/null
+            done
+            echo "vanilla/libraries classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
+            cp -R dump/. graph/
+            echo "graph after dump overlay: $(find graph -name '*.class' | wc -l | tr -d ' ')"
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/N0Load.java" .
-            javac -cp dump -d . N0Load.java
-            java -cp dump:. N0Load | tee load-smoke.txt
+            javac -cp graph -d . N0Load.java
+            java -cp graph:. N0Load | tee load-smoke.txt
+            echo "load smoke exit: $?"
       - run:
           name: B. GraalVM native-image smoke
           no_output_timeout: 45m
@@ -79,9 +90,8 @@ jobs:
             "$GRAAL_HOME/bin/native-image" --version || true
             cd ~/n0
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/N0Smoke.java" .
-            "$GRAAL_HOME/bin/javac" -cp dump -d . N0Smoke.java
-            set +e
-            ( "$GRAAL_HOME/bin/native-image" -cp "dump:." -H:+ReportExceptionStackTraces \
+            "$GRAAL_HOME/bin/javac" -cp graph -d . N0Smoke.java || echo "javac failed"
+            ( "$GRAAL_HOME/bin/native-image" -cp "graph:." -H:+ReportExceptionStackTraces \
                 -J-Xmx6g --no-fallback -o n0smoke N0Smoke > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
@@ -92,28 +102,27 @@ jobs:
             done
             if kill -0 "$NI_PID" 2>/dev/null; then echo "native-image still running after 30 min, killing"; kill "$NI_PID" 2>/dev/null; fi
             wait "$NI_PID" 2>/dev/null
-            echo "native-image exit: $?"
-            echo "---- last 60 lines ----"
-            tail -60 native-image.log || true
+            echo "---- last 50 lines ----"
+            tail -50 native-image.log || true
             echo "---- error summary ----"
-            grep -E '^Error|Caused by|UnsupportedFeature|Classes that are not reachable|Recompute field' native-image.log | head -40 || true
-            [ -x n0smoke ] && echo "IMAGE BUILT: $(ls -lh n0smoke | awk '{print $5}')" || echo "IMAGE NOT BUILT"
+            grep -E '^Error|Caused by|UnsupportedFeature|not reachable|NoClassDefFound' native-image.log | head -40 || true
+            if [ -x n0smoke ]; then echo "IMAGE BUILT: $(ls -lh n0smoke | awk '{print $5}')"; ./n0smoke || true; else echo "IMAGE NOT BUILT"; fi
       - run:
           name: Package the smoke evidence
           when: always
           command: |
             cd ~/n0
-            tar czf n05-smoke.tgz load-smoke.txt native-image.log n0smoke 2>/dev/null || true
+            tar czf n05-smoke.tgz load-smoke.txt native-image.log 2>/dev/null || true
             ls -lh n05-smoke.tgz || true
       - store_artifacts:
           path: ~/n0/n05-smoke.tgz
           destination: n05-smoke.tgz
       - store_artifacts:
-          path: ~/n0/native-image.log
-          destination: native-image.log
-      - store_artifacts:
           path: ~/n0/load-smoke.txt
           destination: load-smoke.txt
+      - store_artifacts:
+          path: ~/n0/native-image.log
+          destination: native-image.log
 
 workflows:
   n05:
