@@ -54,18 +54,11 @@ jobs:
             set -uo pipefail
             source "$BASH_ENV"
             cd ~/b1/client
-            ARGS_FILE=$(find libraries -name unix_args.txt | head -1)
-            echo "classpath file: $ARGS_FILE"
-            if [ -z "$ARGS_FILE" ]; then echo "client args not found"; ls -R | head -40; exit 0; fi
-            grep -oE '(/|[A-Za-z0-9_.-])[^:[:space:]]*\.jar' "$ARGS_FILE" | sort -u > ~/b1/jars-rel.txt
-            : > ~/b1/jars.txt
-            while IFS= read -r jar; do
-              case "$jar" in /*) echo "$jar" >> ~/b1/jars.txt ;; *) echo "$HOME/b1/client/$jar" >> ~/b1/jars.txt ;; esac
-            done < ~/b1/jars-rel.txt
-            echo "jars: $(wc -l < ~/b1/jars.txt | tr -d ' ')"
+            find libraries -name '*.jar' > ~/b1/jars.txt
+            echo "library jars: $(wc -l < ~/b1/jars.txt | tr -d ' ')"
             export JAVA_TOOL_OPTIONS="-javaagent:$HOME/b1/agent/dumpagent.jar=$HOME/b1/dump|$HOME/b1/jars.txt|12000"
             echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS"
-            sh ./run.sh --username Dev --version 1.21.1 --gameDir "$HOME/b1/client/game" --assetsDir "$HOME/b1/client/assets" --assetIndex 17 --uuid 00000000000000000000000000000000 --accessToken 0 --userType legacy --versionType release > ~/b1/run.log 2>&1 &
+            python3 "$CIRCLE_WORKING_DIRECTORY/b1/b1/launch_client.py" --root "$HOME/b1/client" > ~/b1/run.log 2>&1 &
             CLIENT_PID=$!
             i=0
             while [ "$i" -lt 36 ]; do
