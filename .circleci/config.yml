@@ -11,6 +11,7 @@ jobs:
       UPSTREAM: https://github.com/AOTFASTLNX/MCFAO
       SOURCE_REF: fix/gl41-pacing
       MCFAO_OPT_LEVEL: -O3
+      RELEASE_REPO: zhangrongxue/mc-aot-sign
     steps:
       - run:
           name: Host facts
@@ -32,6 +33,34 @@ jobs:
       - store_artifacts:
           path: ~/mcfao-build/build.log
           destination: build.log
+      - run:
+          name: Publish the IPA to the private release
+          when: always
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            if [ -z "${GH_TOKEN:-}" ]; then
+              echo "GH_TOKEN is not set; skipping the mirror upload"
+              exit 0
+            fi
+            IPA="$HOME/mcfao-build/FabricAOT-game.ipa"
+            [ -f "$IPA" ] || { echo "no IPA to publish"; exit 0; }
+            SHA=$(shasum -a 256 "$IPA" | awk '{print $1}')
+            TAG="ipa-$(date -u +%Y%m%d-%H%M)-$(echo "$SHA" | cut -c1-8)"
+            BODY="source ${SOURCE_SHA:-unknown}; sha256 $SHA; built $(date -u +%FT%TZ)"
+            echo "creating release $TAG in $RELEASE_REPO"
+            CREATE=$(printf '{"tag_name":"%s","name":"%s","body":"%s","target_commitish":"main"}' "$TAG" "$TAG" "$BODY" \
+              | curl -sS -X POST -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                  -H "Content-Type: application/json" --data-binary @- \
+                  "https://api.github.com/repos/$RELEASE_REPO/releases")
+            UPLOAD=$(echo "$CREATE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["upload_url"].split("{")[0])')
+            echo "uploading to $UPLOAD"
+            curl -sS --fail -X POST -H "Authorization: token $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$IPA" \
+              "$UPLOAD?name=FabricAOT-game-$TAG.ipa" | head -c 400
+            echo
+            echo "published: https://github.com/$RELEASE_REPO/releases/tag/$TAG"
       - run:
           name: Tail on failure
           when: on_fail
