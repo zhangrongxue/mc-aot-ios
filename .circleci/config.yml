@@ -56,7 +56,7 @@ jobs:
             cd ~/b1/client
             find libraries -name '*.jar' > ~/b1/jars.txt
             echo "library jars: $(wc -l < ~/b1/jars.txt | tr -d ' ')"
-            export JAVA_TOOL_OPTIONS="-javaagent:$HOME/b1/agent/dumpagent.jar=$HOME/b1/dump|$HOME/b1/jars.txt|12000"
+            export JAVA_TOOL_OPTIONS="-javaagent:$HOME/b1/agent/dumpagent.jar=$HOME/b1/dump|$HOME/b1/jars.txt|120000"
             echo "JAVA_TOOL_OPTIONS=$JAVA_TOOL_OPTIONS"
             python3 "$CIRCLE_WORKING_DIRECTORY/b1/b1/launch_client.py" --root "$HOME/b1/client" > ~/b1/run.log 2>&1 &
             CLIENT_PID=$!
