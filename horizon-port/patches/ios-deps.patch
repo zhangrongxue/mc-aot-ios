@@ -303,29 +303,6 @@ index 78cfdee..562d512 100644
  /// Refuse startup if any merged copy could not be installed, before loading any mod.
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
-diff --git a/crates/horizon-game/src/lib.rs b/crates/horizon-game/src/lib.rs
-index 4b9cb3a..23fa915 100644
---- a/crates/horizon-game/src/lib.rs
-+++ b/crates/horizon-game/src/lib.rs
-@@ -32,5 +32,18 @@ pub fn main() {
-     horizon_mod_host::main_with(Vec::new(), &[], &[], startup);
- }
- 
-+/// iOS entry: the shell supplies the prepared-resource directory and a writable
-+/// game directory instead of a command line. Does not return.
-+pub fn main_ios(resources: std::path::PathBuf, game_dir: std::path::PathBuf) -> ! {
-+    horizon_guest_stack::prepare_main();
-+    let startup = horizon_client::entry::prepare_ios(resources, game_dir).unwrap_or_else(|error| {
-+        eprintln!("Horizon: {error}");
-+        std::process::exit(1);
-+    });
-+    std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
-+    horizon_mod_host::main_with(Vec::new(), &[], &[], startup);
-+    std::process::exit(0)
-+}
-+
- /// Establish the executable main thread stack before initialization.
- pub use horizon_guest_stack::prepare_main as prepare_main_stack;
 diff --git a/crates/horizon-hdr/Cargo.toml b/crates/horizon-hdr/Cargo.toml
 index bd16669..9d5ba23 100644
 --- a/crates/horizon-hdr/Cargo.toml
