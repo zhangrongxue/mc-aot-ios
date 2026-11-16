@@ -14,6 +14,7 @@ public final class BootstrapSmoke {
     public static void main(String[] args) throws Exception {
         System.out.println("B1 static-runtime bootstrap smoke");
         seedLoaderPaths();
+        seedConfigFormats();
 
         long started = System.nanoTime();
         net.minecraft.server.Bootstrap.bootStrap();
@@ -37,6 +38,39 @@ public final class BootstrapSmoke {
             System.out.println("seeded FMLPaths at " + gameDir);
         } catch (Throwable error) {
             System.out.println("cannot seed FMLPaths: " + error);
+        }
+    }
+
+    /**
+     * night-config finds its file formats through ServiceLoader, and a class dump carries no
+     * META-INF/services entries, so FerriteCore hits "No suitable format for ...toml".
+     * Registering the parsers explicitly replaces what ServiceLoader would have done.
+     */
+    private static void seedConfigFormats() {
+        String[][] formats = {
+            {"toml", "com.electronwill.nightconfig.toml.TomlFormat"},
+            {"json", "com.electronwill.nightconfig.json.JsonFormat"},
+            {"yaml", "com.electronwill.nightconfig.yaml.YamlFormat"},
+            {"yml", "com.electronwill.nightconfig.yaml.YamlFormat"},
+        };
+        try {
+            Class<?> detector = Class.forName("com.electronwill.nightconfig.core.file.FormatDetector");
+            Method register = detector.getMethod("registerExtension", String.class,
+                    Class.forName("com.electronwill.nightconfig.core.ConfigFormat"));
+            int registered = 0;
+            for (String[] entry : formats) {
+                try {
+                    Class<?> formatClass = Class.forName(entry[1]);
+                    Object format = formatClass.getMethod("instance").invoke(null);
+                    register.invoke(null, entry[0], format);
+                    registered++;
+                } catch (Throwable ignored) {
+                    // that parser is not on the classpath
+                }
+            }
+            System.out.println("registered config formats: " + registered);
+        } catch (Throwable error) {
+            System.out.println("cannot seed config formats: " + error);
         }
     }
 }
