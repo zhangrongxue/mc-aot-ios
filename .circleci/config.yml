@@ -67,7 +67,7 @@ jobs:
             source "$BASH_ENV"
             cd ~/b1
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/BootstrapSmoke.java" .
-            javac -cp graph.jar -d . BootstrapSmoke.java || echo "javac failed"
+            javac -proc:none -cp graph.jar -d . BootstrapSmoke.java || echo "javac failed"
             REFLECT=""
             CONF=""
             for cfg in graph/b1-reflect-config.json graph/b1-reflect-equals.json graph/b1-reflect-plugins.json graph/b1-reflect-services.json; do
