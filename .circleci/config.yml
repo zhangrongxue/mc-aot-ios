@@ -94,11 +94,17 @@ jobs:
             echo "---- run (no GPU: GLFW failure is expected) ----"
             if [ -x b1client ]; then
               echo "IMAGE BUILT: $(ls -lh b1client | awk '{print $5}')"
-              ( ./b1client > client-run.log 2>&1 & echo $! > client.pid ; sleep 150 ; kill $(cat client.pid) 2>/dev/null ) ; tail -40 client-run.log || true
+              ( ./b1client > client-run.log 2>&1 & echo $! > client.pid ; sleep 150 ; kill $(cat client.pid) 2>/dev/null ) || true
+              echo "---- client log ----"
+              cat client-run.log 2>/dev/null | tail -60 || true
+              echo "---- end ----"
             else
               echo "IMAGE NOT BUILT"
               grep -E 'Fatal|Caused by|NoClassDefFound|Error' native-image.log | head -20 || true
             fi
+      - store_artifacts:
+          path: ~/b1/client-run.log
+          destination: b1-client-run.log
       - store_artifacts:
           path: ~/b1/native-image.log
           destination: b1-client-entry-native-image.log
