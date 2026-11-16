@@ -9,7 +9,7 @@ jobs:
       xcode: 27.1.0
     resource_class: m4pro.medium
     environment:
-      GRAPH_TAG: b1-client-graph
+      GRAPH_TAG: b1-client-graph2
       GRAPH_REPO: zhangrongxue/mc-aot-sign
     steps:
       - checkout
@@ -40,9 +40,9 @@ jobs:
               "https://api.github.com/repos/$GRAPH_REPO/releases/tags/$GRAPH_TAG")
             URL=$(printf '%s' "$META" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["assets"][0]["url"])')
             echo "asset: $URL"
-            curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$URL" -o graph.zip
-            ls -lh graph.zip
-            python3 "$CIRCLE_WORKING_DIRECTORY/b1/n1/unzip_norm.py" graph.zip graph
+            curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$URL" -o graph.tgz
+            ls -lh graph.tgz
+            mkdir -p graph && tar -xzf graph.tgz -C graph
             echo "classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
             echo "client classes: $(find graph -path '*net/minecraft/client/*' -name '*.class' | wc -l | tr -d ' ')"
             # native-image opens classpath entries as file systems; a jar avoids the directory path
