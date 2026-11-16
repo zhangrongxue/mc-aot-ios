@@ -80,7 +80,7 @@ jobs:
             if [ -n "$CONF" ]; then REFLECT="-H:ReflectionConfigurationFiles=$CONF"; fi
             ( native-image -cp "graph.jar:." -H:+ReportExceptionStackTraces -J-Xmx20g $REFLECT \
                 -H:IncludeResources='b1-config.*' -H:IncludeResources='assets/minecraft/lang/.*' -H:IncludeResources='META-INF/services/.*' \
-                --allow-incomplete-classpath --no-fallback -o b1client ClientMain > native-image.log 2>&1 ) &
+                --allow-incomplete-classpath --initialize-at-build-time=org.lwjgl --no-fallback -o b1client ClientMain > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
             while [ "$i" -lt 300 ]; do
