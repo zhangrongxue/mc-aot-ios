@@ -27,7 +27,6 @@ jobs:
             git -C /tmp/horizon checkout 69ab572dbd1bf2f2924a424f791014e09d9d0b50
             cp -R "$CIRCLE_WORKING_DIRECTORY/horizon-port/port/horizon-ios" /tmp/horizon/crates/horizon-ios
             python3 -c 'from pathlib import Path; p=Path("/tmp/horizon/Cargo.toml"); s=p.read_text(); s=s.replace("members = [", "members = [\n    \"crates/horizon-ios\",", 1); p.write_text(s)'
-            grep -n 'horizon-ios' /tmp/horizon/Cargo.toml
             cd /tmp/horizon
             git rev-parse HEAD
       - run:
@@ -53,15 +52,23 @@ jobs:
             set -o pipefail
             . "$HOME/.cargo/env"
             cd /tmp/horizon
-            cargo build -p horizon-ios --target aarch64-apple-ios --release 2>&1 | tee /tmp/staticlib.log
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build -p horizon-ios --target aarch64-apple-ios --release 2>&1 | tee /tmp/staticlib.log
       - run:
-          name: Package unsigned IPA
+          name: Package diagnostic IPA
           command: |
             set -euxo pipefail
             cd "$CIRCLE_WORKING_DIRECTORY"
-            HORIZON_DIR=/tmp/horizon bash horizon-port/ios/build.sh
+            HORIZON_DIR=/tmp/horizon BUILD_DIR="$PWD/horizon-port/build-m2" DIST_DIR="$PWD/horizon-port/dist-m2" bash horizon-port/ios/build.sh
+      - run:
+          name: Package engine IPA
+          command: |
+            set -euxo pipefail
+            cd "$CIRCLE_WORKING_DIRECTORY"
+            HORIZON_DIR=/tmp/horizon APP_NAME=HorizonEngine MAIN_SOURCE="$PWD/horizon-port/ios/main_engine.m" BUNDLE_ID=dev.horizon.ios.engine IPA_NAME=HorizonEngine-dev-unsigned.ipa BUILD_DIR="$PWD/horizon-port/build-engine" DIST_DIR="$PWD/horizon-port/dist-engine" bash horizon-port/ios/build.sh
       - store_artifacts:
-          path: horizon-port/dist
+          path: horizon-port/dist-m2
+      - store_artifacts:
+          path: horizon-port/dist-engine
       - store_artifacts:
           path: /tmp/staticlib.log
       - store_artifacts:
