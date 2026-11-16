@@ -1,14 +1,20 @@
+import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
 /**
  * B1 static-runtime smoke: run Minecraft's own data bootstrap without ModLauncher.
  *
- * <p>If this links and prints registry counts in a native image, the transformed class graph is
- * good enough to initialise the game's registries with no module layer, no ModLauncher and no
- * JIT. That is the first real step of the static runtime (the client entry needs a GL context,
- * which CI does not have; the data bootstrap does not).
+ * <p>The image has no FML launch context, so classes that ask {@code FMLPaths.GAMEDIR.get()}
+ * (Entity Texture Features was the first) NPE. Seeding the paths is exactly what the real static
+ * runtime has to do, so it belongs in the smoke as well.
  */
 public final class BootstrapSmoke {
     public static void main(String[] args) throws Exception {
         System.out.println("B1 static-runtime bootstrap smoke");
+        seedLoaderPaths();
+
         long started = System.nanoTime();
         net.minecraft.server.Bootstrap.bootStrap();
         long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
@@ -17,5 +23,20 @@ public final class BootstrapSmoke {
         System.out.println("items=" + net.minecraft.core.registries.BuiltInRegistries.ITEM.size());
         System.out.println("entities=" + net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.size());
         System.out.println("ok");
+    }
+
+    private static void seedLoaderPaths() {
+        try {
+            Path gameDir = Paths.get(System.getProperty("java.io.tmpdir"), "b1-game");
+            Files.createDirectories(gameDir);
+            Files.createDirectories(gameDir.resolve("config"));
+            Files.createDirectories(gameDir.resolve("mods"));
+            Class<?> fmlPaths = Class.forName("net.neoforged.fml.loading.FMLPaths");
+            Method load = fmlPaths.getMethod("loadAbsolutePaths", Path.class);
+            load.invoke(null, gameDir);
+            System.out.println("seeded FMLPaths at " + gameDir);
+        } catch (Throwable error) {
+            System.out.println("cannot seed FMLPaths: " + error);
+        }
     }
 }
