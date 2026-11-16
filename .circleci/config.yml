@@ -114,8 +114,11 @@ jobs:
             # Mesa provides libOSMesa for the offscreen context
             brew list mesa >/dev/null 2>&1 || brew install mesa
             export B1_OSMESA="$(brew --prefix mesa)/lib/libOSMesa.dylib"
+            # headless GLFW shim: a fake window backed by an OSMesa context
+            clang -dynamiclib -O2 -o libglfw.dylib "$CIRCLE_WORKING_DIRECTORY/ci/headless_glfw.c" 2> shim.log || { cat shim.log; true; }
+            export B1_GLFW="$PWD/libglfw.dylib"
             ls -l "$B1_OSMESA" || true
-            ( B1_NATIVES="$PWD/natives" DYLD_LIBRARY_PATH="$(brew --prefix mesa)/lib" ./b1client > client-run.log 2>&1 & echo $! > client.pid ; sleep 240 ; kill $(cat client.pid) 2>/dev/null ) || true
+            ( B1_NATIVES="$PWD/natives" B1_GLFW="$PWD/libglfw.dylib" OSMESA_LIBRARY="$B1_OSMESA" DYLD_LIBRARY_PATH="$(brew --prefix mesa)/lib" ./b1client > client-run.log 2>&1 & echo $! > client.pid ; sleep 300 ; kill $(cat client.pid) 2>/dev/null ) || true
               echo "---- client log ----"
               cat client-run.log 2>/dev/null | tail -60 || true
               echo "---- end ----"
