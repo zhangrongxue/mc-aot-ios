@@ -70,7 +70,7 @@ jobs:
             javac -cp graph.jar -d . BootstrapSmoke.java || echo "javac failed"
             REFLECT=""
             CONF=""
-            for cfg in graph/b1-reflect-config.json graph/b1-reflect-equals.json graph/b1-reflect-plugins.json; do
+            for cfg in graph/b1-reflect-config.json graph/b1-reflect-equals.json graph/b1-reflect-plugins.json graph/b1-reflect-services.json; do
               if [ -f "$cfg" ]; then CONF="${CONF:+$CONF,}$cfg"; fi
             done
             if [ -n "$CONF" ]; then REFLECT="-H:ReflectionConfigurationFiles=$CONF"; echo "reflect configs: $CONF"; fi
