@@ -259,6 +259,73 @@ index 7b7a557..8b097d7 100644
  # OpenGL (WGL on Windows, EGL on Linux), the last fallback, for GPUs with no Vulkan or
  # DirectX 12 driver (`graphicsApi`, graphics.rs).
  wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
+diff --git a/crates/horizon-client/src/entry.rs b/crates/horizon-client/src/entry.rs
+index 78cfdee..562d512 100644
+--- a/crates/horizon-client/src/entry.rs
++++ b/crates/horizon-client/src/entry.rs
+@@ -3,6 +3,7 @@
+ mod horizon_look;
+ use crate::{crash, game, logging};
+ use horizon_mod_package::selection::{Argument, LaunchArguments};
++use std::path::PathBuf;
+ pub(crate) mod dedicated_arguments;
+ pub(crate) mod runtime_environment;
+ 
+@@ -47,6 +48,31 @@ pub fn prepare() -> Startup {
+     }
+ }
+ 
++/// iOS startup: the app has no command line, so the shell supplies the resource
++/// directory and the writable game directory. The synthetic command line is
++/// accepted by the same parser the desktop executable uses.
++pub fn prepare_ios(resources: PathBuf, game_dir: PathBuf) -> Result<Startup, String> {
++    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
++    let mut command = std::process::Command::new(exe);
++    command
++        .arg("--resources")
++        .arg(resources)
++        .arg("--game-dir")
++        .arg(game_dir)
++        .arg("--developer-single-player")
++        .arg("--no-pause");
++    let launch =
++        LaunchArguments::for_command(&command).map_err(|error| error.to_string())?;
++    let options = game::Options::validate(launch.clone())
++        .map_err(|error| error.to_string())?
++        .ok_or_else(|| "iOS startup cannot use --help".to_owned())?;
++    Ok(Startup {
++        launch,
++        options,
++        _capture: None,
++    })
++}
++
+ /// Refuse startup if any merged copy could not be installed, before loading any mod.
+ /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
+ /// start is how we ensure none of a refused mod's rows run.
+diff --git a/crates/horizon-game/src/lib.rs b/crates/horizon-game/src/lib.rs
+index 4b9cb3a..23fa915 100644
+--- a/crates/horizon-game/src/lib.rs
++++ b/crates/horizon-game/src/lib.rs
+@@ -32,5 +32,18 @@ pub fn main() {
+     horizon_mod_host::main_with(Vec::new(), &[], &[], startup);
+ }
+ 
++/// iOS entry: the shell supplies the prepared-resource directory and a writable
++/// game directory instead of a command line. Does not return.
++pub fn main_ios(resources: std::path::PathBuf, game_dir: std::path::PathBuf) -> ! {
++    horizon_guest_stack::prepare_main();
++    let startup = horizon_client::entry::prepare_ios(resources, game_dir).unwrap_or_else(|error| {
++        eprintln!("Horizon: {error}");
++        std::process::exit(1);
++    });
++    std::hint::black_box(&horizon_mod_package::holder::CAPABILITY);
++    horizon_mod_host::main_with(Vec::new(), &[], &[], startup);
++    std::process::exit(0)
++}
++
+ /// Establish the executable main thread stack before initialization.
+ pub use horizon_guest_stack::prepare_main as prepare_main_stack;
 diff --git a/crates/horizon-hdr/Cargo.toml b/crates/horizon-hdr/Cargo.toml
 index bd16669..9d5ba23 100644
 --- a/crates/horizon-hdr/Cargo.toml
