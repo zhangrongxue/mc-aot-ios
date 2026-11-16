@@ -15,12 +15,21 @@ int main(int argc, char *argv[]) {
                             attributes:nil
                                  error:nil];
 
-        NSString *resources =
+        NSString *bundleResources =
             [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"horizon-client/26.3"];
-        [manager createDirectoryAtPath:resources
+        NSString *documentsResources =
+            [gameDir stringByAppendingPathComponent:@"horizon-client/26.3"];
+        [manager createDirectoryAtPath:documentsResources
            withIntermediateDirectories:YES
                             attributes:nil
                                  error:nil];
+
+        // Imported resources in Documents win over the empty placeholder in
+        // the bundle. Files app can see Documents because Info.plist enables
+        // UIFileSharingEnabled.
+        NSString *marker =
+            [documentsResources stringByAppendingPathComponent:@"horizon-resources.json"];
+        NSString *resources = [manager fileExistsAtPath:marker] ? documentsResources : bundleResources;
 
         setenv("HORIZON_HOME", gameDir.UTF8String, 1);
         setenv("HORIZON_NO_AUDIO", "1", 1);
