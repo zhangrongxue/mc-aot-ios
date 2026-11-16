@@ -1,0 +1,71 @@
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+/**
+ * B1 client-entry smoke: hand control to Minecraft's own client main inside the image.
+ *
+ * <p>The registry bootstrap already runs (see BootstrapSmoke); this walks the rest of the real
+ * entry point: version detection, FML shims, then {@code net.minecraft.client.main.Main.main}.
+ * Run it on a machine with a GPU - the CI macOS VMs have no OpenGL context.
+ */
+public final class ClientMain {
+    public static void main(String[] args) throws Exception {
+        System.out.println("B1 client-entry smoke");
+        Path gameDir = Paths.get(System.getProperty("user.dir"), "run");
+        Files.createDirectories(gameDir.resolve("config"));
+        Files.createDirectories(gameDir.resolve("mods"));
+        seedLoaderPaths(gameDir);
+        seedFmlLoader(gameDir);
+        net.minecraft.SharedConstants.tryDetectVersion();
+        System.out.println("game version: " + net.minecraft.SharedConstants.getCurrentVersion().getName());
+
+        String[] clientArgs = {
+            "--username", "Dev",
+            "--version", "1.21.1",
+            "--gameDir", gameDir.toString(),
+            "--assetsDir", System.getProperty("b1.assets", Paths.get("assets").toAbsolutePath().toString()),
+            "--assetIndex", "17",
+            "--uuid", "00000000000000000000000000000000",
+            "--accessToken", "0",
+            "--userType", "legacy",
+            "--versionType", "release",
+            "--width", "1280",
+            "--height", "720",
+        };
+        System.out.println("starting net.minecraft.client.main.Main with " + clientArgs.length + " args");
+        net.minecraft.client.main.Main.main(clientArgs);
+    }
+
+    private static void seedLoaderPaths(Path gameDir) {
+        try {
+            Class<?> fmlPaths = Class.forName("net.neoforged.fml.loading.FMLPaths");
+            Method load = fmlPaths.getMethod("loadAbsolutePaths", Path.class);
+            load.invoke(null, gameDir);
+            System.out.println("seeded FMLPaths at " + gameDir);
+        } catch (Throwable error) {
+            System.out.println("cannot seed FMLPaths: " + error);
+        }
+    }
+
+    private static void seedFmlLoader(Path gameDir) {
+        try {
+            Class<?> loader = Class.forName("net.neoforged.fml.loading.FMLLoader");
+            Class<?> loadingList = Class.forName("net.neoforged.fml.loading.LoadingModList");
+            Field field = loader.getDeclaredField("loadingModList");
+            field.setAccessible(true);
+            field.set(null, loadingList.getMethod("get").invoke(null));
+            Field dist = loader.getDeclaredField("dist");
+            dist.setAccessible(true);
+            dist.set(null, Class.forName("net.neoforged.api.distmarker.Dist").getEnumConstants()[0]);
+            Field game = loader.getDeclaredField("gamePath");
+            game.setAccessible(true);
+            game.set(null, gameDir);
+            System.out.println("seeded FMLLoader");
+        } catch (Throwable error) {
+            System.out.println("cannot seed FMLLoader: " + error);
+        }
+    }
+}
