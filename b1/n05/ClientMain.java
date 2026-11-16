@@ -72,8 +72,28 @@ public final class ClientMain {
             game.setAccessible(true);
             game.set(null, gameDir);
             System.out.println("seeded FMLLoader");
+            seedBackgroundWaiter();
         } catch (Throwable error) {
             System.out.println("cannot seed FMLLoader: " + error);
+        }
+    }
+
+    /** BackgroundWaiter submits the bootstrap work to a static pool FML would have created. */
+    private static void seedBackgroundWaiter() {
+        try {
+            Class<?> waiter = Class.forName("net.neoforged.fml.loading.BackgroundWaiter");
+            Field runner = waiter.getDeclaredField("runner");
+            runner.setAccessible(true);
+            if (runner.get(null) == null) {
+                runner.set(null, java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                    Thread thread = new Thread(runnable, "b1-bootstrap");
+                    thread.setDaemon(true);
+                    return thread;
+                }));
+                System.out.println("seeded BackgroundWaiter");
+            }
+        } catch (Throwable error) {
+            System.out.println("cannot seed BackgroundWaiter: " + error);
         }
     }
 }
