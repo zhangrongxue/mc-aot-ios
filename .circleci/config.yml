@@ -65,6 +65,19 @@ jobs:
             set -euxo pipefail
             cd "$CIRCLE_WORKING_DIRECTORY"
             HORIZON_DIR=/tmp/horizon PROFILE=fast APP_NAME=HorizonEngine MAIN_SOURCE="$PWD/horizon-port/ios/main_engine.m" BUNDLE_ID=dev.horizon.ios.engine IPA_NAME=HorizonEngine-dev-unsigned.ipa BUILD_DIR="$PWD/horizon-port/build-engine" DIST_DIR="$PWD/horizon-port/dist-engine" bash horizon-port/ios/build.sh
+      - run:
+          name: Upload IPAs to a GitHub release
+          command: |
+            set -euxo pipefail
+            if [ -z "${GH_TOKEN:-}" ]; then echo "GH_TOKEN not set; skipping release upload"; exit 0; fi
+            TAG="horizon-ios-dev-$(date -u +%Y%m%d%H%M%S)"
+            API="https://api.github.com/repos/zhangrongxue/mc-aot-ios"
+            RELEASE=$(curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API/releases" -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"body\":\"Horizon iOS development build ($TAG)\"}")
+            ID=$(printf '%s' "$RELEASE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+            for f in horizon-port/dist-engine/*.ipa horizon-port/dist-m2/*.ipa; do
+              curl -sS --fail -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f" "https://uploads.github.com/repos/zhangrongxue/mc-aot-ios/releases/$ID/assets?name=$(basename "$f")"
+            done
+            echo "RELEASE_TAG=$TAG"
       - store_artifacts:
           path: horizon-port/dist-m2
       - store_artifacts:
