@@ -17,6 +17,14 @@ public final class ClientMain {
         Path gameDir = Paths.get(System.getProperty("user.dir"), "run");
         Files.createDirectories(gameDir.resolve("config"));
         Files.createDirectories(gameDir.resolve("mods"));
+        String natives = System.getenv("B1_NATIVES");
+        if (natives != null && !natives.isEmpty()) {
+            Path path = Paths.get(natives).toAbsolutePath();
+            System.setProperty("org.lwjgl.librarypath", path.toString());
+            System.setProperty("java.library.path", path.toString());
+            System.setProperty("org.lwjgl.util.NoChecks", "false");
+            System.out.println("lwjgl natives: " + path);
+        }
         seedLoaderPaths(gameDir);
         seedFmlLoader(gameDir);
         net.minecraft.SharedConstants.tryDetectVersion();
