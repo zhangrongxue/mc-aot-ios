@@ -10,6 +10,12 @@ import org.lwjgl.system.MemoryUtil;
  */
 public final class LwjglProbe {
     public static void main(String[] args) {
+        String natives = System.getenv("B1_NATIVES");
+        if (natives != null && !natives.isEmpty()) {
+            System.setProperty("org.lwjgl.librarypath", natives);
+            System.setProperty("java.library.path", natives);
+            System.out.println("natives: " + natives);
+        }
         System.out.println("B1 LWJGL AOT probe");
         System.out.println("version: " + org.lwjgl.Version.getVersion());
         System.out.println("allocator: " + MemoryUtil.getAllocator(false));
