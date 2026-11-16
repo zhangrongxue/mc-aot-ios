@@ -15,3 +15,7 @@ horizon-core = { path = "../horizon-core" }
 horizon-client = { path = "../horizon-client", default-features = false }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
+horizon-engine-slots = { path = "../horizon-engine-slots" }
+mod-api = { package = "horizon-mod-api", path = "../horizon-mod-api" }
+mod-points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
+mod-render = { package = "horizon-mod-render", path = "../horizon-mod-render" }
