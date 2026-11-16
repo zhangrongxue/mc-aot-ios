@@ -555,6 +555,22 @@ index 7705fea..7c42622 100644
  mod tests {
      use super::*;
  
+diff --git a/crates/horizon-threads/src/heap_census.rs b/crates/horizon-threads/src/heap_census.rs
+index b3a4222..ba3909a 100644
+--- a/crates/horizon-threads/src/heap_census.rs
++++ b/crates/horizon-threads/src/heap_census.rs
+@@ -183,9 +183,9 @@ pub fn census() -> Vec<(&'static str, isize)> {
+     by_name
+ }
+ 
+-#[cfg(not(miri))]
++#[cfg(not(any(miri, target_os = "ios")))]
+ use mimalloc::MiMalloc as BackingAlloc;
+-#[cfg(miri)]
++#[cfg(any(miri, target_os = "ios"))]
+ use std::alloc::System as BackingAlloc;
+ 
+ /// mimalloc with a tag in front of each block (see the module).
 diff --git a/crates/horizon-threads/src/lib.rs b/crates/horizon-threads/src/lib.rs
 index 5328a4f..a070f69 100644
 --- a/crates/horizon-threads/src/lib.rs
