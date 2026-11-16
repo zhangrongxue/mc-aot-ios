@@ -15,12 +15,14 @@ static DIAGNOSTICS: OnceLock<CString> = OnceLock::new();
 pub extern "C" fn horizon_ios_diagnostics() -> *const c_char {
     DIAGNOSTICS
         .get_or_init(|| {
+            let mappings = horizon_client_lib::keybinds::all_mappings().count();
             let text = format!(
                 "Horizon iOS development shell\n\
                  Rust core: {}\n\
                  Minecraft target: {}\n\
                  Build arch: {}\n\
-                 Status: engine linked, game entry not wired yet",
+                 Input mappings: {mappings}\n\
+                 Status: client library linked, game entry not wired yet",
                 env!("CARGO_PKG_VERSION"),
                 horizon_core::VANILLA_VERSION,
                 std::env::consts::ARCH,
