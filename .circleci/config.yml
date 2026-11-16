@@ -36,7 +36,7 @@ jobs:
             set -euxo pipefail
             cd /tmp/horizon
             git apply --verbose "$CIRCLE_WORKING_DIRECTORY/horizon-port/patches/ios-deps.patch"
-            git diff --stat
+            git --no-pager diff --stat
       - run:
           name: Diagnose horizon-client-lib for iOS
           no_output_timeout: 30m
