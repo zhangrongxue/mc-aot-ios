@@ -9,7 +9,7 @@ jobs:
       xcode: 27.1.0
     resource_class: m4pro.medium
     environment:
-      GRAPH_TAG: b1-client-graph2
+      GRAPH_TAG: b1-client-graph3
       GRAPH_REPO: zhangrongxue/mc-aot-sign
     steps:
       - checkout
