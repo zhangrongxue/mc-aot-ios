@@ -12,5 +12,6 @@ path = "src/lib.rs"
 
 [dependencies]
 horizon-core = { path = "../horizon-core" }
+horizon-client = { path = "../horizon-client", default-features = false }
 horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
-horizon-game = { path = "../horizon-game", default-features = false }
+horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
