@@ -111,9 +111,12 @@ public final class ClientMain {
      * touches GLFW; it never overrides the context creation API.
      */
     private static void seedHeadlessGlfw() {
-        if (System.getenv("B1_OSMESA") == null) {
+        String osmesa = System.getenv("B1_OSMESA");
+        if (osmesa == null) {
             return;
         }
+        System.setProperty("org.lwjgl.opengl.libname", osmesa);
+        System.out.println("gl: libname -> " + osmesa);
         try {
             org.lwjgl.glfw.GLFW.glfwInitHint(org.lwjgl.glfw.GLFW.GLFW_PLATFORM, org.lwjgl.glfw.GLFW.GLFW_PLATFORM_NULL);
             org.lwjgl.glfw.GLFW.glfwWindowHint(org.lwjgl.glfw.GLFW.GLFW_CONTEXT_CREATION_API,
