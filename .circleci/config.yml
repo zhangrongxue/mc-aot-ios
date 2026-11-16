@@ -75,7 +75,7 @@ jobs:
             done
             if [ -n "$CONF" ]; then REFLECT="-H:ReflectionConfigurationFiles=$CONF"; echo "reflect configs: $CONF"; fi
             ( native-image -cp "graph.jar:." -H:+ReportExceptionStackTraces -J-Xmx20g $REFLECT \
-                -H:IncludeResources='b1-config.*' -H:IncludeResources='META-INF/services/.*' \
+                -H:IncludeResources='b1-config.*' -H:IncludeResources='assets/minecraft/lang/.*' -H:IncludeResources='META-INF/services/.*' \
                 --allow-incomplete-classpath --no-fallback -o b1bootstrap BootstrapSmoke > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
