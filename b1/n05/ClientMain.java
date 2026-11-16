@@ -116,6 +116,7 @@ public final class ClientMain {
             return;
         }
         System.setProperty("org.lwjgl.opengl.libname", osmesa);
+        System.setProperty("org.lwjgl.opengl.osmesa.libname", osmesa);
         System.out.println("gl: libname -> " + osmesa);
         try {
             org.lwjgl.glfw.GLFW.glfwInitHint(org.lwjgl.glfw.GLFW.GLFW_PLATFORM, org.lwjgl.glfw.GLFW.GLFW_PLATFORM_NULL);
@@ -124,6 +125,35 @@ public final class ClientMain {
             System.out.println("glfw: null platform + OSMesa context");
         } catch (Throwable error) {
             System.out.println("cannot configure headless glfw: " + error);
+        }
+        createOsmesaContext();
+    }
+
+    /**
+     * Sodium runs GL calls from {@code VertexFormat}'s class initialiser, long before Minecraft
+     * creates its window, because FML's early window would normally have made a context current.
+     * Creating and binding an OSMesa context here gives those calls somewhere to go.
+     */
+    private static void createOsmesaContext() {
+        try {
+            Class<?> osmesaClass = Class.forName("org.lwjgl.opengl.OSMesa");
+            int rgba = osmesaClass.getField("OSMESA_RGBA").getInt(null);
+            long context = (Long) osmesaClass.getMethod("OSMesaCreateContextExt",
+                    int.class, int.class, int.class, int.class, long.class)
+                    .invoke(null, rgba, 24, 8, 0, 0L);
+            if (context == 0L) {
+                System.out.println("osmesa: context creation returned null");
+                return;
+            }
+            java.nio.ByteBuffer buffer = java.nio.ByteBuffer
+                    .allocateDirect(1280 * 720 * 4)
+                    .order(java.nio.ByteOrder.nativeOrder());
+            boolean current = (Boolean) osmesaClass.getMethod("OSMesaMakeCurrent",
+                    long.class, java.nio.ByteBuffer.class, int.class, int.class, int.class)
+                    .invoke(null, context, buffer, 0x1401 /* GL_UNSIGNED_BYTE */, 1280, 720);
+            System.out.println("osmesa: context=" + context + " current=" + current);
+        } catch (Throwable error) {
+            System.out.println("cannot create osmesa context: " + error);
         }
     }
 }
