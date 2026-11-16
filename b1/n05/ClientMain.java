@@ -27,6 +27,7 @@ public final class ClientMain {
         }
         seedLoaderPaths(gameDir);
         seedFmlLoader(gameDir);
+        seedHeadlessGlfw();
         net.minecraft.SharedConstants.tryDetectVersion();
         System.out.println("game version: " + net.minecraft.SharedConstants.getCurrentVersion().getName());
 
@@ -101,6 +102,25 @@ public final class ClientMain {
             }
         } catch (Throwable error) {
             System.out.println("cannot seed BackgroundWaiter: " + error);
+        }
+    }
+
+    /**
+     * GLFW is asked for an OSMesa-backed context on the null platform, so Minecraft can render
+     * into an offscreen buffer on a machine without a GPU. Both hints are set before Minecraft
+     * touches GLFW; it never overrides the context creation API.
+     */
+    private static void seedHeadlessGlfw() {
+        if (System.getenv("B1_OSMESA") == null) {
+            return;
+        }
+        try {
+            org.lwjgl.glfw.GLFW.glfwInitHint(org.lwjgl.glfw.GLFW.GLFW_PLATFORM, org.lwjgl.glfw.GLFW.GLFW_PLATFORM_NULL);
+            org.lwjgl.glfw.GLFW.glfwWindowHint(org.lwjgl.glfw.GLFW.GLFW_CONTEXT_CREATION_API,
+                    org.lwjgl.glfw.GLFW.GLFW_OSMESA_CONTEXT_API);
+            System.out.println("glfw: null platform + OSMesa context");
+        } catch (Throwable error) {
+            System.out.println("cannot configure headless glfw: " + error);
         }
     }
 }
