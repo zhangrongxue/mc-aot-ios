@@ -3,7 +3,8 @@
 //! This first milestone only reports what was compiled and linked. The game
 //! entry point will replace it once the client library builds for iOS.
 
-use std::ffi::{CString, c_char};
+use std::ffi::{CStr, CString, c_char};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 static DIAGNOSTICS: OnceLock<CString> = OnceLock::new();
@@ -41,4 +42,25 @@ pub extern "C" fn horizon_ios_self_test() -> i32 {
     } else {
         0
     }
+}
+
+/// Starts the real game. The caller must not have called `UIApplicationMain`:
+/// winit's iOS backend owns that call and the app's lifecycle.
+///
+/// `resources` must point at a directory prepared by `horizon-prepare`;
+/// `game_dir` must be writable (the app's Documents directory).
+#[unsafe(no_mangle)]
+pub extern "C" fn horizon_ios_run(resources: *const c_char, game_dir: *const c_char) -> i32 {
+    if resources.is_null() || game_dir.is_null() {
+        return 2;
+    }
+    let resources = match unsafe { CStr::from_ptr(resources) }.to_str() {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => return 2,
+    };
+    let game_dir = match unsafe { CStr::from_ptr(game_dir) }.to_str() {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => return 2,
+    };
+    horizon_game::main_ios(resources, game_dir);
 }
