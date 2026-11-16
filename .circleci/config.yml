@@ -30,7 +30,11 @@ jobs:
             # GraalVM 21.0.2 ships an ld64.lld that cannot read Xcode 27 .tbd stubs; point it at
             # the toolchain linker instead so the client image can link against Foundation/libSystem.
             LLD="$GRAAL_HOME/lib/svm/bin/ld64.lld"
-            if [ -f "$LLD" ]; then mv "$LLD" "$LLD.bundled"; ln -sf /usr/bin/ld "$LLD"; fi
+            if [ -f "$LLD" ]; then
+              mv "$LLD" "$LLD.bundled"
+              printf '#!/bin/sh\nexec /usr/bin/ld "$@"\n' > "$LLD"
+              chmod +x "$LLD"
+            fi
             echo "export GRAAL_HOME=$GRAAL_HOME" >> "$BASH_ENV"
             echo 'export JAVA_HOME="$HOME/jdk21-home"' >> "$BASH_ENV"
             echo 'export PATH="$GRAAL_HOME/bin:$HOME/jdk21-home/bin:$PATH"' >> "$BASH_ENV"
