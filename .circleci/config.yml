@@ -32,8 +32,13 @@ jobs:
             LLD="$GRAAL_HOME/lib/svm/bin/ld64.lld"
             if [ -f "$LLD" ]; then
               mv "$LLD" "$LLD.bundled"
-              printf '#!/bin/sh\nexec /usr/bin/ld "$@"\n' > "$LLD"
+              if brew list llvm >/dev/null 2>&1; then
+                cp "$(brew --prefix llvm)/bin/ld64.lld" "$LLD"
+              else
+                brew install llvm && cp "$(brew --prefix llvm)/bin/ld64.lld" "$LLD"
+              fi
               chmod +x "$LLD"
+              "$LLD" --version || true
             fi
             echo "export GRAAL_HOME=$GRAAL_HOME" >> "$BASH_ENV"
             echo 'export JAVA_HOME="$HOME/jdk21-home"' >> "$BASH_ENV"
