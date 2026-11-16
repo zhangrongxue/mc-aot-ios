@@ -1,7 +1,7 @@
 version: 2.1
 
-# B1: static-runtime bootstrap - run the registry bootstrap inside a native image.
-# The graph was captured locally (CI has no OpenGL) and lives as a private release asset.
+# B1: static-runtime bootstrap - run Minecraft's registry bootstrap inside a native image,
+# built from the captured client graph plus a small overrides layer.
 
 jobs:
   b1-bootstrap:
@@ -11,6 +11,7 @@ jobs:
     environment:
       GRAPH_TAG: b1-client-graph3
       GRAPH_REPO: zhangrongxue/mc-aot-sign
+      OVERRIDES_TAG: b1-overrides
     steps:
       - checkout
       - run:
@@ -29,27 +30,32 @@ jobs:
             echo 'export JAVA_HOME="$HOME/jdk21-home"' >> "$BASH_ENV"
             echo 'export PATH="$GRAAL_HOME/bin:$HOME/jdk21-home/bin:$PATH"' >> "$BASH_ENV"
       - run:
-          name: Fetch the private client graph
+          name: Fetch the graph and the overrides
           no_output_timeout: 30m
           command: |
             set -euo pipefail
             source "$BASH_ENV"
             if [ -z "${GH_TOKEN:-}" ]; then echo "GH_TOKEN missing"; exit 1; fi
+            gh_api() { curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
             mkdir -p ~/b1 && cd ~/b1
-            META=$(curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$GRAPH_REPO/releases/tags/$GRAPH_TAG")
-            URL=$(printf '%s' "$META" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["assets"][0]["url"])')
-            echo "asset: $URL"
+            META=$(gh_api "https://api.github.com/repos/$GRAPH_REPO/releases/tags/$GRAPH_TAG")
+            URL=$(printf '%s' "$META" | python3 -c 'import json,sys; print(json.load(sys.stdin)["assets"][0]["url"])')
             curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$URL" -o graph.tgz
             ls -lh graph.tgz
             mkdir -p graph && tar -xzf graph.tgz -C graph
+            OVER=$(gh_api "https://api.github.com/repos/$GRAPH_REPO/releases/tags/$OVERRIDES_TAG")
+            OV_URL=$(printf '%s' "$OVER" | python3 -c 'import json,sys; a=json.load(sys.stdin).get("assets",[]); print(a[0]["url"] if a else "")')
+            if [ -n "$OV_URL" ]; then
+              curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$OV_URL" -o overrides.tgz
+              tar -xzf overrides.tgz -C graph
+              echo "overrides: $(tar -tzf overrides.tgz | wc -l | tr -d ' ')"
+            fi
             echo "classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
             echo "client classes: $(find graph -path '*net/minecraft/client/*' -name '*.class' | wc -l | tr -d ' ')"
-            # native-image opens classpath entries as file systems; a jar avoids the directory path
             jar cf graph.jar -C graph .
             ls -lh graph.jar
       - run:
-          name: Build the client smoke image
+          name: Build the bootstrap image
           when: always
           no_output_timeout: 60m
           command: |
@@ -69,14 +75,19 @@ jobs:
             done
             if kill -0 "$NI_PID" 2>/dev/null; then echo "native-image still running after 50 min, killing"; kill "$NI_PID" 2>/dev/null; fi
             wait "$NI_PID" 2>/dev/null
-            echo "---- last 60 lines ----"
-            tail -60 native-image.log || true
-            echo "---- errors ----"
-            grep -E '^Error|Caused by|UnsupportedFeature|not reachable|NoClassDefFound' native-image.log | head -40 || true
-            if [ -x b1bootstrap ]; then echo "IMAGE BUILT: $(ls -lh b1bootstrap | awk '{print $5}')"; ./b1bootstrap || true; else echo "IMAGE NOT BUILT"; fi
+            echo "---- last 40 lines ----"
+            tail -40 native-image.log || true
+            echo "---- run ----"
+            if [ -x b1bootstrap ]; then
+              echo "IMAGE BUILT: $(ls -lh b1bootstrap | awk '{print $5}')"
+              ./b1bootstrap || echo "run exit: $?"
+            else
+              echo "IMAGE NOT BUILT"
+              grep -E 'Fatal|Caused by|NoClassDefFound|Error' native-image.log | head -20 || true
+            fi
       - store_artifacts:
           path: ~/b1/native-image.log
-          destination: b1-client-native-image.log
+          destination: b1-bootstrap-native-image.log
 
 workflows:
   b1bootstrap:
