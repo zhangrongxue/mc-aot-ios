@@ -13,7 +13,7 @@ import java.nio.file.Paths;
  */
 public final class ClientMain {
     public static void main(String[] args) throws Exception {
-        System.out.println("B1 client-entry smoke");
+        System.out.println("B1 client-entry smoke (build 3)");
         Path gameDir = Paths.get(System.getProperty("user.dir"), "run");
         Files.createDirectories(gameDir.resolve("config"));
         Files.createDirectories(gameDir.resolve("mods"));
@@ -84,6 +84,7 @@ public final class ClientMain {
             Class<?> waiter = Class.forName("net.neoforged.fml.loading.BackgroundWaiter");
             Field runner = waiter.getDeclaredField("runner");
             runner.setAccessible(true);
+            System.out.println("BackgroundWaiter.runner before: " + runner.get(null));
             if (runner.get(null) == null) {
                 runner.set(null, java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
                     Thread thread = new Thread(runnable, "b1-bootstrap");
