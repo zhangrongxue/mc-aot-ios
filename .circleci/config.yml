@@ -1,18 +1,15 @@
 version: 2.1
 
-# B1: client entry smoke - build net.minecraft.client.main.Main into a native image and run it.
-# The CI macOS VM has no OpenGL context, so the run is expected to stop at GLFW; everything
-# before that (FML shims, registries, resource index) is what this job measures.
+# B1: does a newer LWJGL initialise its MemoryUtil inside a native image?
+# 3.3.3 (what the pack ships) fails with "Failed to find field offset in class" because it reads
+# java.nio.Buffer offsets through sun.misc.Unsafe. This job tries the candidate versions with a
+# minimal image, which is far cheaper than rebuilding the 358 MB client image.
 
 jobs:
-  b1-client-entry:
+  lwjgl-probe:
     macos:
       xcode: 27.1.0
     resource_class: m4pro.medium
-    environment:
-      GRAPH_TAG: b1-client-graph3
-      GRAPH_REPO: zhangrongxue/mc-aot-sign
-      OVERRIDES_TAG: b1-overrides
     steps:
       - checkout
       - run:
@@ -27,95 +24,54 @@ jobs:
             mkdir -p graalvm && tar xzf graalvm.tar.gz -C graalvm --strip-components=1
             GRAAL_HOME="$HOME/graalvm/Contents/Home"
             [ -x "$GRAAL_HOME/bin/native-image" ] || GRAAL_HOME="$HOME/graalvm"
-            # GraalVM 21.0.2 ships an ld64.lld that cannot read Xcode 27 .tbd stubs; point it at
-            # the toolchain linker instead so the client image can link against Foundation/libSystem.
+            # Xcode 27 .tbd stubs need a current lld
             LLD="$GRAAL_HOME/lib/svm/bin/ld64.lld"
             if [ -f "$LLD" ]; then
               mv "$LLD" "$LLD.bundled"
               brew list lld >/dev/null 2>&1 || brew install lld
               printf '#!/bin/sh\nexec "%s/bin/ld64.lld" "$@"\n' "$(brew --prefix lld)" > "$LLD"
               chmod +x "$LLD"
-              "$LLD" --version || true
             fi
             echo "export GRAAL_HOME=$GRAAL_HOME" >> "$BASH_ENV"
             echo 'export JAVA_HOME="$HOME/jdk21-home"' >> "$BASH_ENV"
             echo 'export PATH="$GRAAL_HOME/bin:$HOME/jdk21-home/bin:$PATH"' >> "$BASH_ENV"
       - run:
-          name: Fetch the graph and the overrides
-          no_output_timeout: 30m
-          command: |
-            set -euo pipefail
-            source "$BASH_ENV"
-            gh_api() { curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
-            mkdir -p ~/b1 && cd ~/b1
-            META=$(gh_api "https://api.github.com/repos/$GRAPH_REPO/releases/tags/$GRAPH_TAG")
-            URL=$(printf '%s' "$META" | python3 -c 'import json,sys; print(json.load(sys.stdin)["assets"][0]["url"])')
-            curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$URL" -o graph.tgz
-            mkdir -p graph && tar -xzf graph.tgz -C graph
-            OVER=$(gh_api "https://api.github.com/repos/$GRAPH_REPO/releases/tags/$OVERRIDES_TAG")
-            OV_URL=$(printf '%s' "$OVER" | python3 -c 'import json,sys; a=json.load(sys.stdin).get("assets",[]); print(a[0]["url"] if a else "")')
-            if [ -n "$OV_URL" ]; then
-              curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$OV_URL" -o overrides.tgz
-              tar -xzf overrides.tgz -C graph
-            fi
-            find graph/jdk -maxdepth 1 -type d -name 'proxy*' -exec rm -rf {} + 2>/dev/null || true
-            echo "classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
-            jar cf graph.jar -C graph .
-            ls -lh graph.jar
-      - run:
-          name: Build and run the client entry image
+          name: Probe each LWJGL version
           when: always
-          no_output_timeout: 60m
+          no_output_timeout: 40m
           command: |
             set -uo pipefail
             source "$BASH_ENV"
-            cd ~/b1
-            cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/ClientMain.java" .
-            javac -proc:none -cp graph.jar -d . ClientMain.java || echo "javac failed"
-            CONF=""
-            for cfg in graph/b1-reflect-config.json graph/b1-reflect-equals.json graph/b1-reflect-plugins.json graph/b1-reflect-services.json; do
-              if [ -f "$cfg" ]; then CONF="${CONF:+$CONF,}$cfg"; fi
+            mkdir -p ~/probe && cd ~/probe
+            cp "$CIRCLE_WORKING_DIRECTORY/b1/n06/LwjglProbe.java" .
+            for V in 3.3.3 3.3.6 3.4.3; do
+              echo "===================== lwjgl $V"
+              mkdir -p "lib-$V" && cd "lib-$V"
+              cp "../LwjglProbe.java" .
+              CP=""
+              for m in lwjgl lwjgl-glfw lwjgl-opengl lwjgl-stb lwjgl-tinyfd lwjgl-openal lwjgl-jemalloc lwjgl-freetype; do
+                curl -fsSL -o "$m.jar" "https://repo1.maven.org/maven2/org/lwjgl/$m/$V/$m-$V.jar" || true
+                curl -fsSL -o "$m-natives.jar" "https://repo1.maven.org/maven2/org/lwjgl/$m/$V/$m-$V-natives-macos-arm64.jar" || true
+                unzip -oq "$m-natives.jar" -d natives 2>/dev/null || true
+                CP="$CP:$m.jar"
+              done
+              CP="${CP#:}"
+              javac -proc:none -cp "$CP" -d . LwjglProbe.java || echo "javac failed for $V"
+              ( native-image -cp "$CP:." -J-Xmx6g --no-fallback -o "probe-$V" LwjglProbe > "build-$V.log" 2>&1 ) || true
+              if [ -x "probe-$V" ]; then
+                echo "image built for $V: $(ls -lh probe-$V | awk '{print $5}')"
+                B1_NATIVES="$PWD/natives" ./"probe-$V" || echo "run exit: $?"
+              else
+                echo "image NOT built for $V"
+                grep -E 'Fatal|error|Error' "build-$V.log" | head -8 || true
+              fi
+              cd ..
             done
-            REFLECT=""
-            if [ -n "$CONF" ]; then REFLECT="-H:ReflectionConfigurationFiles=$CONF"; fi
-            ( native-image -cp "graph.jar:." -H:+ReportExceptionStackTraces -J-Xmx20g $REFLECT \
-                -H:IncludeResources='b1-config.*' -H:IncludeResources='assets/minecraft/lang/.*' -H:IncludeResources='META-INF/services/.*' \
-                --allow-incomplete-classpath --no-fallback -o b1client ClientMain > native-image.log 2>&1 ) &
-            NI_PID=$!
-            i=0
-            while [ "$i" -lt 300 ]; do
-              i=$((i + 1))
-              if ! kill -0 "$NI_PID" 2>/dev/null; then break; fi
-              sleep 10
-            done
-            if kill -0 "$NI_PID" 2>/dev/null; then echo "still building after 50 min, killing"; kill "$NI_PID" 2>/dev/null; fi
-            wait "$NI_PID" 2>/dev/null
-            tail -30 native-image.log || true
-            echo "---- run (no GPU: GLFW failure is expected) ----"
-            if [ -x b1client ]; then
-              echo "IMAGE BUILT: $(ls -lh b1client | awk '{print $5}')"
-              # LWJGL natives: the image has no jars to extract them from
-            mkdir -p natives
-            for m in lwjgl lwjgl-glfw lwjgl-opengl lwjgl-stb lwjgl-tinyfd lwjgl-openal lwjgl-jemalloc lwjgl-freetype; do
-              curl -fsSL -o "/tmp/$m.jar" "https://repo1.maven.org/maven2/org/lwjgl/$m/3.3.3/$m-3.3.3-natives-macos-arm64.jar" && unzip -oq "/tmp/$m.jar" -d natives || true
-            done
-            echo "natives: $(ls natives/*.dylib 2>/dev/null | wc -l | tr -d ' ')"
-            ( B1_NATIVES="$PWD/natives" ./b1client > client-run.log 2>&1 & echo $! > client.pid ; sleep 150 ; kill $(cat client.pid) 2>/dev/null ) || true
-              echo "---- client log ----"
-              cat client-run.log 2>/dev/null | tail -60 || true
-              echo "---- end ----"
-            else
-              echo "IMAGE NOT BUILT"
-              grep -E 'Fatal|Caused by|NoClassDefFound|Error' native-image.log | head -20 || true
-            fi
       - store_artifacts:
-          path: ~/b1/client-run.log
-          destination: b1-client-run.log
-      - store_artifacts:
-          path: ~/b1/native-image.log
-          destination: b1-client-entry-native-image.log
+          path: ~/probe
+          destination: lwjgl-probe
 
 workflows:
-  b1client:
+  lwjglprobe:
     jobs:
-      - b1-client-entry
+      - lwjgl-probe
