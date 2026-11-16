@@ -33,7 +33,7 @@ jobs:
             if [ -f "$LLD" ]; then
               mv "$LLD" "$LLD.bundled"
               brew list lld >/dev/null 2>&1 || brew install lld
-              cp "$(brew --prefix lld)/bin/ld64.lld" "$LLD"
+              printf '#!/bin/sh\nexec "%s/bin/ld64.lld" "$@"\n' "$(brew --prefix lld)" > "$LLD"
               chmod +x "$LLD"
               "$LLD" --version || true
             fi
