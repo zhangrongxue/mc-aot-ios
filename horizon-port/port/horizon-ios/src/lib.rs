@@ -62,5 +62,19 @@ pub extern "C" fn horizon_ios_run(resources: *const c_char, game_dir: *const c_c
         Ok(path) => PathBuf::from(path),
         Err(_) => return 2,
     };
-    horizon_game::main_ios(resources, game_dir);
+    let startup = horizon_client::entry::prepare_ios(resources, game_dir).unwrap_or_else(|error| {
+        eprintln!("Horizon: {error}");
+        std::process::exit(2);
+    });
+    horizon_client::entry::start(
+        horizon_mod_package::runtime::Runtime::default(),
+        |_, _| (Vec::new(), ()),
+        horizon_client::entry::CodeRuntime {
+            initialize: |_| {},
+            refusal: |_| None,
+            startup_refused: |_| false,
+        },
+        startup,
+    );
+    0
 }
