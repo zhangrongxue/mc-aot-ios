@@ -32,11 +32,8 @@ jobs:
             LLD="$GRAAL_HOME/lib/svm/bin/ld64.lld"
             if [ -f "$LLD" ]; then
               mv "$LLD" "$LLD.bundled"
-              if brew list llvm >/dev/null 2>&1; then
-                cp "$(brew --prefix llvm)/bin/ld64.lld" "$LLD"
-              else
-                brew install llvm && cp "$(brew --prefix llvm)/bin/ld64.lld" "$LLD"
-              fi
+              brew list lld >/dev/null 2>&1 || brew install lld
+              cp "$(brew --prefix lld)/bin/ld64.lld" "$LLD"
               chmod +x "$LLD"
               "$LLD" --version || true
             fi
