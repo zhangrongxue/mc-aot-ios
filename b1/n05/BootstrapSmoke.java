@@ -36,10 +36,43 @@ public final class BootstrapSmoke {
             Method load = fmlPaths.getMethod("loadAbsolutePaths", Path.class);
             load.invoke(null, gameDir);
             System.out.println("seeded FMLPaths at " + gameDir);
+            seedConfigFiles(gameDir);
         } catch (Throwable error) {
             System.out.println("cannot seed FMLPaths: " + error);
         }
     }
+
+    /** Configs baked into the image; mods parse them from their own {@code <clinit>}. */
+    private static void seedConfigFiles(Path gameDir) {
+        int copied = 0;
+        try (java.io.InputStream list = BootstrapSmoke.class.getResourceAsStream("/b1-config-list.txt")) {
+            if (list == null) {
+                System.out.println("no baked configs");
+                return;
+            }
+            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(list, "UTF-8"));
+            String name;
+            while ((name = reader.readLine()) != null) {
+                name = name.trim();
+                if (name.isEmpty()) {
+                    continue;
+                }
+                try (java.io.InputStream stream = BootstrapSmoke.class.getResourceAsStream("/b1-config/" + name)) {
+                    if (stream == null) {
+                        continue;
+                    }
+                    Path target = gameDir.resolve("config").resolve(name);
+                    Files.createDirectories(target.getParent());
+                    Files.copy(stream, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    copied++;
+                }
+            }
+        } catch (Throwable error) {
+            System.out.println("cannot seed configs: " + error);
+        }
+        System.out.println("seeded configs: " + copied);
+    }
+
 
     /**
      * night-config finds its file formats through ServiceLoader, and a class dump carries no
