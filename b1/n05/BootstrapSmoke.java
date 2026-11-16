@@ -17,6 +17,10 @@ public final class BootstrapSmoke {
         seedConfigFormats();
 
         long started = System.nanoTime();
+        // The client/server main normally does this before any registry is touched; without it
+        // DataFixers dies with "Game version not set".
+        net.minecraft.SharedConstants.tryDetectVersion();
+        System.out.println("game version: " + net.minecraft.SharedConstants.getCurrentVersion().getName());
         net.minecraft.server.Bootstrap.bootStrap();
         long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
         System.out.println("bootstrap ms=" + elapsedMs);
