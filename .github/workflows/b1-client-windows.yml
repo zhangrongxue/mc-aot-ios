@@ -29,9 +29,9 @@ jobs:
           $url = "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-21.0.2/graalvm-community-jdk-21.0.2_windows-x64_bin.zip"
           curl.exe -sSL -o graalvm.zip $url
           Expand-Archive graalvm.zip -DestinationPath C:\graal
-          $home = (Get-ChildItem C:\graal -Directory | Select-Object -First 1).FullName
-          "GRAAL_HOME=$home" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          & "$home\bin\java.exe" -version
+          $graalHome = (Get-ChildItem C:\graal -Directory | Select-Object -First 1).FullName
+          "GRAAL_HOME=$graalHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & "$graalHome\bin\java.exe" -version
 
       - name: Fetch the graph and overrides
         shell: pwsh
