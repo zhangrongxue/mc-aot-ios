@@ -27,6 +27,10 @@ jobs:
             mkdir -p graalvm && tar xzf graalvm.tar.gz -C graalvm --strip-components=1
             GRAAL_HOME="$HOME/graalvm/Contents/Home"
             [ -x "$GRAAL_HOME/bin/native-image" ] || GRAAL_HOME="$HOME/graalvm"
+            # GraalVM 21.0.2 ships an ld64.lld that cannot read Xcode 27 .tbd stubs; point it at
+            # the toolchain linker instead so the client image can link against Foundation/libSystem.
+            LLD="$GRAAL_HOME/lib/svm/bin/ld64.lld"
+            if [ -f "$LLD" ]; then mv "$LLD" "$LLD.bundled"; ln -sf /usr/bin/ld "$LLD"; fi
             echo "export GRAAL_HOME=$GRAAL_HOME" >> "$BASH_ENV"
             echo 'export JAVA_HOME="$HOME/jdk21-home"' >> "$BASH_ENV"
             echo 'export PATH="$GRAAL_HOME/bin:$HOME/jdk21-home/bin:$PATH"' >> "$BASH_ENV"
@@ -70,7 +74,7 @@ jobs:
             if [ -n "$CONF" ]; then REFLECT="-H:ReflectionConfigurationFiles=$CONF"; fi
             ( native-image -cp "graph.jar:." -H:+ReportExceptionStackTraces -J-Xmx20g $REFLECT \
                 -H:IncludeResources='b1-config.*' -H:IncludeResources='assets/minecraft/lang/.*' -H:IncludeResources='META-INF/services/.*' \
-                --allow-incomplete-classpath -H:NativeLinkerOption=-fuse-ld=lld --no-fallback -o b1client ClientMain > native-image.log 2>&1 ) &
+                --allow-incomplete-classpath --no-fallback -o b1client ClientMain > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
             while [ "$i" -lt 300 ]; do
