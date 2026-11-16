@@ -1,10 +1,10 @@
 version: 2.1
 
-# B1: native-image smoke on the *client* class graph.
+# B1: static-runtime bootstrap - run the registry bootstrap inside a native image.
 # The graph was captured locally (CI has no OpenGL) and lives as a private release asset.
 
 jobs:
-  b1-client-image:
+  b1-bootstrap:
     macos:
       xcode: 27.1.0
     resource_class: m4pro.medium
@@ -56,10 +56,10 @@ jobs:
             set -uo pipefail
             source "$BASH_ENV"
             cd ~/b1
-            cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/ClientSmoke.java" .
-            javac -cp graph.jar -d . ClientSmoke.java || echo "javac failed"
+            cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/BootstrapSmoke.java" .
+            javac -cp graph.jar -d . BootstrapSmoke.java || echo "javac failed"
             ( native-image -cp "graph.jar:." -H:+ReportExceptionStackTraces -J-Xmx6g \
-                --no-fallback -o b1client ClientSmoke > native-image.log 2>&1 ) &
+                --no-fallback -o b1bootstrap BootstrapSmoke > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
             while [ "$i" -lt 300 ]; do
@@ -73,12 +73,12 @@ jobs:
             tail -60 native-image.log || true
             echo "---- errors ----"
             grep -E '^Error|Caused by|UnsupportedFeature|not reachable|NoClassDefFound' native-image.log | head -40 || true
-            if [ -x b1client ]; then echo "IMAGE BUILT: $(ls -lh b1client | awk '{print $5}')"; ./b1client || true; else echo "IMAGE NOT BUILT"; fi
+            if [ -x b1bootstrap ]; then echo "IMAGE BUILT: $(ls -lh b1bootstrap | awk '{print $5}')"; ./b1bootstrap || true; else echo "IMAGE NOT BUILT"; fi
       - store_artifacts:
           path: ~/b1/native-image.log
           destination: b1-client-native-image.log
 
 workflows:
-  b1image:
+  b1bootstrap:
     jobs:
-      - b1-client-image
+      - b1-bootstrap
