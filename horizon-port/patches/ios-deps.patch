@@ -273,7 +273,7 @@ index bd16669..9d5ba23 100644
  ash = { version = "0.38", default-features = false }
  
 diff --git a/crates/horizon-hdr/src/lib.rs b/crates/horizon-hdr/src/lib.rs
-index 4c35972..033a46a 100644
+index 4c35972..1d82e98 100644
 --- a/crates/horizon-hdr/src/lib.rs
 +++ b/crates/horizon-hdr/src/lib.rs
 @@ -9,7 +9,7 @@ pub mod wayland;
@@ -285,7 +285,24 @@ index 4c35972..033a46a 100644
  pub fn open_vulkan_device(
      adapter: &wgpu::Adapter,
      desc: &wgpu::DeviceDescriptor<'_>,
-@@ -60,7 +60,7 @@ pub fn experimental_features() -> wgpu::ExperimentalFeatures {
+@@ -47,6 +47,16 @@ pub fn open_vulkan_device(
+     Some(unsafe { adapter.create_device_from_hal(open, desc) })
+ }
+ 
++/// Metal and other non-Vulkan backends have no `VK_EXT_hdr_metadata`; wgpu
++/// opens the device itself and the surface's own metadata path is used.
++#[cfg(not(any(target_os = "linux", target_os = "windows")))]
++pub fn open_vulkan_device(
++    _adapter: &wgpu::Adapter,
++    _desc: &wgpu::DeviceDescriptor<'_>,
++) -> Option<Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError>> {
++    None
++}
++
+ /// wgpu's opt-in to its `EXPERIMENTAL_*` features, which the crates that forbid unsafe code
+ /// can't give: hardware ray queries, asked for only when the player turns ray tracing on
+ /// (`gfx/ray_query.rs` in horizon-client-render).
+@@ -60,7 +70,7 @@ pub fn experimental_features() -> wgpu::ExperimentalFeatures {
  /// content is BT.709, peaks at `peak` nits and is no darker than `black`. Needs a
  /// device from `open_vulkan_device` and a configured surface; does nothing otherwise.
  pub fn set_metadata(device: &wgpu::Device, surface: &wgpu::Surface<'_>, peak: f32, black: f32) {
@@ -294,7 +311,7 @@ index 4c35972..033a46a 100644
      {
          use wgpu::hal::api::Vulkan;
          // Safety: read-only access to handles wgpu keeps alive while these guards live.
-@@ -87,11 +87,11 @@ pub fn set_metadata(device: &wgpu::Device, surface: &wgpu::Surface<'_>, peak: f3
+@@ -87,11 +97,11 @@ pub fn set_metadata(device: &wgpu::Device, surface: &wgpu::Surface<'_>, peak: f3
          // Safety: a live swapchain of this device, one metadata entry for it.
          unsafe { loader.set_hdr_metadata(&[swapchain], &[metadata(peak, black)]) };
      }
@@ -308,7 +325,7 @@ index 4c35972..033a46a 100644
  fn metadata(peak: f32, black: f32) -> ash::vk::HdrMetadataEXT<'static> {
      let xy = |x, y| ash::vk::XYColorEXT { x, y };
      ash::vk::HdrMetadataEXT::default()
-@@ -107,7 +107,7 @@ fn metadata(peak: f32, black: f32) -> ash::vk::HdrMetadataEXT<'static> {
+@@ -107,7 +117,7 @@ fn metadata(peak: f32, black: f32) -> ash::vk::HdrMetadataEXT<'static> {
          .max_frame_average_light_level(0.0)
  }
  
