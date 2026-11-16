@@ -68,6 +68,8 @@ jobs:
             done
             # The dump captured JDK classes too; they must not shadow the image's own java.base.
             rm -rf graph/java graph/jdk graph/sun graph/com/sun 2>/dev/null || true
+            # Module descriptors confuse jar(1) and mean nothing on a classpath.
+            find graph -name 'module-info.class' -delete 2>/dev/null || true
             echo "classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
             jar cf graph.jar -C graph .
             ls -lh graph.jar
