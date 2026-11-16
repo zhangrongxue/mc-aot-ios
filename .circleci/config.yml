@@ -1,10 +1,11 @@
 version: 2.1
 
-# B1: static-runtime bootstrap - run Minecraft's registry bootstrap inside a native image,
-# built from the captured client graph plus a small overrides layer.
+# B1: client entry smoke - build net.minecraft.client.main.Main into a native image and run it.
+# The CI macOS VM has no OpenGL context, so the run is expected to stop at GLFW; everything
+# before that (FML shims, registries, resource index) is what this job measures.
 
 jobs:
-  b1-bootstrap:
+  b1-client-entry:
     macos:
       xcode: 27.1.0
     resource_class: m4pro.medium
@@ -35,48 +36,41 @@ jobs:
           command: |
             set -euo pipefail
             source "$BASH_ENV"
-            if [ -z "${GH_TOKEN:-}" ]; then echo "GH_TOKEN missing"; exit 1; fi
             gh_api() { curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
             mkdir -p ~/b1 && cd ~/b1
             META=$(gh_api "https://api.github.com/repos/$GRAPH_REPO/releases/tags/$GRAPH_TAG")
             URL=$(printf '%s' "$META" | python3 -c 'import json,sys; print(json.load(sys.stdin)["assets"][0]["url"])')
             curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$URL" -o graph.tgz
-            ls -lh graph.tgz
             mkdir -p graph && tar -xzf graph.tgz -C graph
             OVER=$(gh_api "https://api.github.com/repos/$GRAPH_REPO/releases/tags/$OVERRIDES_TAG")
             OV_URL=$(printf '%s' "$OVER" | python3 -c 'import json,sys; a=json.load(sys.stdin).get("assets",[]); print(a[0]["url"] if a else "")')
             if [ -n "$OV_URL" ]; then
               curl -sSL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$OV_URL" -o overrides.tgz
               tar -xzf overrides.tgz -C graph
-              echo "overrides: $(tar -tzf overrides.tgz | wc -l | tr -d ' ')"
             fi
-            echo "classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
-            echo "client classes: $(find graph -path '*net/minecraft/client/*' -name '*.class' | wc -l | tr -d ' ')"
-            # The dump captured runtime-generated proxy classes; native-image defines its own
-            # jdk.proxyN modules and aborts on the collision.
             find graph/jdk -maxdepth 1 -type d -name 'proxy*' -exec rm -rf {} + 2>/dev/null || true
-            echo "proxy dirs left: $(find graph/jdk -maxdepth 1 -type d -name 'proxy*' 2>/dev/null | wc -l | tr -d ' ')"
+            echo "classes: $(find graph -name '*.class' | wc -l | tr -d ' ')"
             jar cf graph.jar -C graph .
             ls -lh graph.jar
       - run:
-          name: Build the bootstrap image
+          name: Build and run the client entry image
           when: always
           no_output_timeout: 60m
           command: |
             set -uo pipefail
             source "$BASH_ENV"
             cd ~/b1
-            cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/BootstrapSmoke.java" .
-            javac -proc:none -cp graph.jar -d . BootstrapSmoke.java || echo "javac failed"
-            REFLECT=""
+            cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/ClientMain.java" .
+            javac -proc:none -cp graph.jar -d . ClientMain.java || echo "javac failed"
             CONF=""
             for cfg in graph/b1-reflect-config.json graph/b1-reflect-equals.json graph/b1-reflect-plugins.json graph/b1-reflect-services.json; do
               if [ -f "$cfg" ]; then CONF="${CONF:+$CONF,}$cfg"; fi
             done
-            if [ -n "$CONF" ]; then REFLECT="-H:ReflectionConfigurationFiles=$CONF"; echo "reflect configs: $CONF"; fi
+            REFLECT=""
+            if [ -n "$CONF" ]; then REFLECT="-H:ReflectionConfigurationFiles=$CONF"; fi
             ( native-image -cp "graph.jar:." -H:+ReportExceptionStackTraces -J-Xmx20g $REFLECT \
                 -H:IncludeResources='b1-config.*' -H:IncludeResources='assets/minecraft/lang/.*' -H:IncludeResources='META-INF/services/.*' \
-                --allow-incomplete-classpath --no-fallback -o b1bootstrap BootstrapSmoke > native-image.log 2>&1 ) &
+                --allow-incomplete-classpath --no-fallback -o b1client ClientMain > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
             while [ "$i" -lt 300 ]; do
@@ -84,23 +78,22 @@ jobs:
               if ! kill -0 "$NI_PID" 2>/dev/null; then break; fi
               sleep 10
             done
-            if kill -0 "$NI_PID" 2>/dev/null; then echo "native-image still running after 50 min, killing"; kill "$NI_PID" 2>/dev/null; fi
+            if kill -0 "$NI_PID" 2>/dev/null; then echo "still building after 50 min, killing"; kill "$NI_PID" 2>/dev/null; fi
             wait "$NI_PID" 2>/dev/null
-            echo "---- last 40 lines ----"
-            tail -40 native-image.log || true
-            echo "---- run ----"
-            if [ -x b1bootstrap ]; then
-              echo "IMAGE BUILT: $(ls -lh b1bootstrap | awk '{print $5}')"
-              ./b1bootstrap || echo "run exit: $?"
+            tail -30 native-image.log || true
+            echo "---- run (no GPU: GLFW failure is expected) ----"
+            if [ -x b1client ]; then
+              echo "IMAGE BUILT: $(ls -lh b1client | awk '{print $5}')"
+              timeout 180 ./b1client || echo "run exit: $?"
             else
               echo "IMAGE NOT BUILT"
               grep -E 'Fatal|Caused by|NoClassDefFound|Error' native-image.log | head -20 || true
             fi
       - store_artifacts:
           path: ~/b1/native-image.log
-          destination: b1-bootstrap-native-image.log
+          destination: b1-client-entry-native-image.log
 
 workflows:
-  b1bootstrap:
+  b1client:
     jobs:
-      - b1-bootstrap
+      - b1-client-entry
