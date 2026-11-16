@@ -23,6 +23,8 @@ jobs:
           command: |
             set -euxo pipefail
             git clone --depth 1 https://github.com/horizon-rust/horizon.git /tmp/horizon
+            git -C /tmp/horizon fetch --depth 1 origin 69ab572dbd1bf2f2924a424f791014e09d9d0b50
+            git -C /tmp/horizon checkout 69ab572dbd1bf2f2924a424f791014e09d9d0b50
             cp -R "$CIRCLE_WORKING_DIRECTORY/horizon-port/port/horizon-ios" /tmp/horizon/crates/horizon-ios
             python3 -c 'from pathlib import Path; p=Path("/tmp/horizon/Cargo.toml"); s=p.read_text(); s=s.replace("members = [", "members = [\n    \"crates/horizon-ios\",", 1); p.write_text(s)'
             grep -n 'horizon-ios' /tmp/horizon/Cargo.toml
@@ -33,7 +35,7 @@ jobs:
           command: |
             set -euxo pipefail
             cd /tmp/horizon
-            git apply "$CIRCLE_WORKING_DIRECTORY/horizon-port/patches/ios-deps.patch"
+            git apply --verbose "$CIRCLE_WORKING_DIRECTORY/horizon-port/patches/ios-deps.patch"
             git diff --stat
       - run:
           name: Diagnose horizon-client-lib for iOS
