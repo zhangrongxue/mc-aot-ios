@@ -17,6 +17,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HORIZON_DIR="${HORIZON_DIR:-/tmp/horizon}"
 TARGET_DIR="${CARGO_TARGET_DIR:-$HORIZON_DIR/target}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
+PROFILE="${PROFILE:-release}"
 APP_NAME="${APP_NAME:-HorizonIOS}"
 MAIN_SOURCE="${MAIN_SOURCE:-$ROOT/ios/main.m}"
 BUNDLE_ID="${BUNDLE_ID:-dev.horizon.ios.dev}"
@@ -29,7 +30,7 @@ DIST="${DIST_DIR:-$ROOT/dist}"
 rm -rf "$OUT" "$DIST"
 mkdir -p "$APP" "$DIST"
 
-STATIC_LIB="$TARGET_DIR/aarch64-apple-ios/release/libhorizon_ios.a"
+STATIC_LIB="$TARGET_DIR/aarch64-apple-ios/$PROFILE/libhorizon_ios.a"
 test -f "$STATIC_LIB"
 
 xcrun --sdk iphoneos clang \
