@@ -85,6 +85,12 @@ public final class ClientMain {
             Field runner = waiter.getDeclaredField("runner");
             runner.setAccessible(true);
             System.out.println("BackgroundWaiter.runner before: " + runner.get(null));
+            Field tick = Class.forName("net.neoforged.fml.loading.FMLLoader").getDeclaredField("progressWindowTick");
+            tick.setAccessible(true);
+            if (tick.get(null) == null) {
+                tick.set(null, (Runnable) () -> { });
+                System.out.println("seeded progressWindowTick");
+            }
             if (runner.get(null) == null) {
                 runner.set(null, java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
                     Thread thread = new Thread(runnable, "b1-bootstrap");
