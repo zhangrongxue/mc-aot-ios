@@ -115,6 +115,11 @@ public final class ClientMain {
         if (osmesa == null) {
             return;
         }
+        String glfw = System.getenv("B1_GLFW");
+        if (glfw != null && !glfw.isEmpty()) {
+            System.setProperty("org.lwjgl.glfw.libname", glfw);
+            System.out.println("glfw: libname -> " + glfw);
+        }
         System.setProperty("org.lwjgl.opengl.libname", osmesa);
         System.setProperty("org.lwjgl.opengl.osmesa.libname", osmesa);
         System.out.println("gl: libname -> " + osmesa);
