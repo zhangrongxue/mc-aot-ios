@@ -37,8 +37,34 @@ public final class BootstrapSmoke {
             load.invoke(null, gameDir);
             System.out.println("seeded FMLPaths at " + gameDir);
             seedConfigFiles(gameDir);
+            seedFmlLoader(gameDir);
         } catch (Throwable error) {
             System.out.println("cannot seed FMLPaths: " + error);
+        }
+    }
+
+    /**
+     * FMLLoader keeps the loading mod list in a private static; mods go through
+     * {@code FMLLoader.getLoadingModList()} instead of {@code LoadingModList.get()}, so the
+     * shim has to be installed where they look.
+     */
+    private static void seedFmlLoader(Path gameDir) {
+        try {
+            Class<?> loader = Class.forName("net.neoforged.fml.loading.FMLLoader");
+            Class<?> loadingList = Class.forName("net.neoforged.fml.loading.LoadingModList");
+            java.lang.reflect.Field field = loader.getDeclaredField("loadingModList");
+            field.setAccessible(true);
+            Object list = loadingList.getMethod("get").invoke(null);
+            field.set(null, list);
+            java.lang.reflect.Field dist = loader.getDeclaredField("dist");
+            dist.setAccessible(true);
+            dist.set(null, Class.forName("net.neoforged.api.distmarker.Dist").getEnumConstants()[0]);
+            java.lang.reflect.Field game = loader.getDeclaredField("gamePath");
+            game.setAccessible(true);
+            game.set(null, gameDir);
+            System.out.println("seeded FMLLoader");
+        } catch (Throwable error) {
+            System.out.println("cannot seed FMLLoader: " + error);
         }
     }
 
