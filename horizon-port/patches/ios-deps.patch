@@ -104,10 +104,29 @@ index 5bf088a..9b97b25 100644
      }
  }
 diff --git a/crates/horizon-client-input/src/keybinds.rs b/crates/horizon-client-input/src/keybinds.rs
-index b08731f..09a58d7 100644
+index b08731f..c214ad1 100644
 --- a/crates/horizon-client-input/src/keybinds.rs
 +++ b/crates/horizon-client-input/src/keybinds.rs
-@@ -302,19 +302,28 @@ pub use horizon_client_core::key_display::{
+@@ -298,23 +298,46 @@ pub use horizon_client_core::key_display::{
+     reset_action_bindings, set_action_binding, set_action_resolver,
+ };
+ 
++/// The key the layout writes, without modifiers. Desktop winit exposes this
++/// through its modifier supplement; iOS has no such extension, but its
++/// `logical_key` is already the unmodified layout key.
++pub fn layout_key(event: &winit::event::KeyEvent) -> winit::keyboard::Key {
++    #[cfg(not(target_os = "ios"))]
++    {
++        use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
++        event.key_without_modifiers()
++    }
++    #[cfg(target_os = "ios")]
++    {
++        event.logical_key.clone()
++    }
++}
++
+ /// A key event: what the layout writes on its key, without modifiers, names
  /// that key from now on (`key_display::learn_layout`), so an AZERTY player's
  /// Q key shows A.
  pub fn learn_layout(event: &winit::event::KeyEvent) {
@@ -127,7 +146,6 @@ index b08731f..09a58d7 100644
 +    #[cfg(not(target_os = "ios"))]
 +    {
 +        use winit::keyboard::{Key, PhysicalKey};
-+        use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 +        let PhysicalKey::Code(code) = event.physical_key else {
 +            return;
 +        };
@@ -135,7 +153,7 @@ index b08731f..09a58d7 100644
 +            return;
 +        };
 +        let learn = horizon_client_core::key_display::learn_layout;
-+        match event.key_without_modifiers() {
++        match layout_key(event) {
 +            Key::Character(text) => learn(name, &text),
 +            Key::Dead(Some(c)) => learn(name, c.encode_utf8(&mut [0; 4])),
 +            _ => {}
@@ -149,7 +167,7 @@ index b08731f..09a58d7 100644
      }
  }
  
-@@ -355,15 +364,25 @@ pub fn layout_key_name(
+@@ -355,15 +378,25 @@ pub fn layout_key_name(
  /// the platform scan code, or the native code winit reports for a key it
  /// doesn't identify; 0 when there is neither. Stable within a platform only.
  pub fn raw_key_code(physical: winit::keyboard::PhysicalKey) -> u32 {
@@ -260,7 +278,7 @@ index 7b7a557..8b097d7 100644
  # DirectX 12 driver (`graphicsApi`, graphics.rs).
  wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 diff --git a/crates/horizon-client/src/entry.rs b/crates/horizon-client/src/entry.rs
-index 78cfdee..562d512 100644
+index 78cfdee..44bd551 100644
 --- a/crates/horizon-client/src/entry.rs
 +++ b/crates/horizon-client/src/entry.rs
 @@ -3,6 +3,7 @@
@@ -271,7 +289,26 @@ index 78cfdee..562d512 100644
  pub(crate) mod dedicated_arguments;
  pub(crate) mod runtime_environment;
  
-@@ -47,6 +48,31 @@ pub fn prepare() -> Startup {
+@@ -24,6 +25,7 @@ impl Startup {
+ /// and resource marker metadata only: no logging, account loading, mods or worker threads.
+ /// Account IO, cwd changes and command registration remain in Options::read, after leases.
+ pub fn prepare() -> Startup {
++    #[cfg(not(target_os = "ios"))]
+     horizon_mod_package::holder::enter();
+     let result: crate::Result<_> = (|| {
+         let mut command = std::process::Command::new(std::env::current_exe()?);
+@@ -39,7 +41,10 @@ pub fn prepare() -> Startup {
+     let Some(options) = options else {
+         std::process::exit(0);
+     };
++    #[cfg(not(target_os = "ios"))]
+     let capture = horizon_mod_package::holder::acquire(&launch);
++    #[cfg(target_os = "ios")]
++    let capture = None;
+     Startup {
+         launch,
+         options,
+@@ -47,6 +52,31 @@ pub fn prepare() -> Startup {
      }
  }
  
@@ -303,6 +340,26 @@ index 78cfdee..562d512 100644
  /// Refuse startup if any merged copy could not be installed, before loading any mod.
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
+diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
+index 6a86a75..229e188 100644
+--- a/crates/horizon-client/src/game/runtime/window_handler.rs
++++ b/crates/horizon-client/src/game/runtime/window_handler.rs
+@@ -437,14 +437,13 @@ impl ApplicationHandler for Game<'_> {
+         };
+         self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
+         if let Some((event, modifiers)) = key {
+-            use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+             let name = match event.physical_key {
+                 PhysicalKey::Code(code) => horizon_client::keybinds::key_name(code),
+                 PhysicalKey::Unidentified(_) => None,
+             };
+             let layout_key = horizon_client::keybinds::layout_key_name(
+                 event.physical_key,
+-                &event.key_without_modifiers(),
++                &horizon_client::keybinds::layout_key(&event),
+             );
+             let raw_code = horizon_client::keybinds::raw_key_code(event.physical_key);
+             let action = match (event.state, event.repeat) {
 diff --git a/crates/horizon-hdr/Cargo.toml b/crates/horizon-hdr/Cargo.toml
 index bd16669..9d5ba23 100644
 --- a/crates/horizon-hdr/Cargo.toml
@@ -378,3 +435,247 @@ index 4c35972..1d82e98 100644
  mod tests {
      #[test]
      fn the_frame_average_is_sent_as_unknown() {
+diff --git a/crates/horizon-threads/Cargo.toml b/crates/horizon-threads/Cargo.toml
+index 6d86d1f..ad08c0c 100644
+--- a/crates/horizon-threads/Cargo.toml
++++ b/crates/horizon-threads/Cargo.toml
+@@ -8,6 +8,8 @@ description = "Scheduling hints for the game's threads and its allocator, and th
+ 
+ [dependencies]
+ horizon-guest-stack = { path = "../horizon-guest-stack" }
++
++[target.'cfg(not(target_os = "ios"))'.dependencies]
+ mimalloc = { version = "0.1.52", default-features = false }
+ libmimalloc-sys = { version = "0.1.49", default-features = false, features = ["extended"] }
+ 
+diff --git a/crates/horizon-threads/src/alloc_count.rs b/crates/horizon-threads/src/alloc_count.rs
+index 5e2e8b6..dcf50cb 100644
+--- a/crates/horizon-threads/src/alloc_count.rs
++++ b/crates/horizon-threads/src/alloc_count.rs
+@@ -5,6 +5,11 @@ use std::{
+     sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
+ };
+ 
++#[cfg(not(target_os = "ios"))]
++use BackingAlloc as BackingAlloc;
++#[cfg(target_os = "ios")]
++use std::alloc::System as BackingAlloc;
++
+ /// Blocks and bytes allocated and freed.
+ #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+ pub struct Counts {
+@@ -130,15 +135,15 @@ pub fn process() -> Counts {
+     total
+ }
+ 
+-/// mimalloc that counts every block; a `realloc` counts as a free plus an allocation.
++/// The heap allocator that counts every block; a `realloc` counts as a free plus an allocation.
+ pub struct CountingAllocator;
+ 
+-// SAFETY: forwards every call to mimalloc; counting never allocates.
++// SAFETY: forwards every call to the backing allocator; counting never allocates.
+ unsafe impl GlobalAlloc for CountingAllocator {
+     #[inline]
+     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+         // SAFETY: the caller's contract.
+-        let block = unsafe { mimalloc::MiMalloc.alloc(layout) };
++        let block = unsafe { BackingAlloc.alloc(layout) };
+         if !block.is_null() {
+             on_alloc(layout.size());
+         }
+@@ -147,7 +152,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
+     #[inline]
+     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+         // SAFETY: the caller's contract.
+-        let block = unsafe { mimalloc::MiMalloc.alloc_zeroed(layout) };
++        let block = unsafe { BackingAlloc.alloc_zeroed(layout) };
+         if !block.is_null() {
+             on_alloc(layout.size());
+         }
+@@ -157,12 +162,12 @@ unsafe impl GlobalAlloc for CountingAllocator {
+     unsafe fn dealloc(&self, block: *mut u8, layout: Layout) {
+         on_free(layout.size());
+         // SAFETY: the caller's contract.
+-        unsafe { mimalloc::MiMalloc.dealloc(block, layout) }
++        unsafe { BackingAlloc.dealloc(block, layout) }
+     }
+     #[inline]
+     unsafe fn realloc(&self, block: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+         // SAFETY: the caller's contract.
+-        let moved = unsafe { mimalloc::MiMalloc.realloc(block, layout, new_size) };
++        let moved = unsafe { BackingAlloc.realloc(block, layout, new_size) };
+         if !moved.is_null() {
+             on_free(layout.size());
+             on_alloc(new_size);
+diff --git a/crates/horizon-threads/src/allocator_stats.rs b/crates/horizon-threads/src/allocator_stats.rs
+index 7705fea..7c42622 100644
+--- a/crates/horizon-threads/src/allocator_stats.rs
++++ b/crates/horizon-threads/src/allocator_stats.rs
+@@ -1,5 +1,7 @@
+ //! The heap the program has in use in mimalloc, from its statistics.
++//! iOS uses the system heap and reports no mimalloc statistics.
+ 
++#[cfg(not(target_os = "ios"))]
+ /// The number after `"key":` on a line of mimalloc's JSON.
+ fn field(line: &str, key: &str) -> Option<usize> {
+     let from = line.find(&format!("\"{key}\":"))? + key.len() + 3;
+@@ -12,6 +14,7 @@ fn field(line: &str, key: &str) -> Option<usize> {
+ }
+ 
+ /// Bytes of the pages `malloc_bins` has in use, plus the huge blocks `malloc_huge` counts by size.
++#[cfg(not(target_os = "ios"))]
+ fn in_use(json: &str) -> Option<usize> {
+     let huge = json.lines().find(|l| l.contains("\"malloc_huge\":"))?;
+     let bins = json.split("\"malloc_bins\"").nth(1)?;
+@@ -23,6 +26,7 @@ fn in_use(json: &str) -> Option<usize> {
+     Some(total)
+ }
+ 
++#[cfg(not(target_os = "ios"))]
+ fn stats_json() -> Option<String> {
+     // SAFETY: a null buffer asks mimalloc for one of its own, freed below with its `mi_free`.
+     let raw = unsafe { libmimalloc_sys::mi_stats_get_json(0, std::ptr::null_mut()) };
+@@ -39,11 +43,18 @@ fn stats_json() -> Option<String> {
+ }
+ 
+ /// The bytes of the pages holding allocations now: the heap in use, counting each page whole.
++#[cfg(not(target_os = "ios"))]
+ pub fn live_bytes() -> Option<usize> {
+     in_use(&stats_json()?)
+ }
+ 
+-#[cfg(test)]
++/// The system heap does not expose mimalloc's page statistics.
++#[cfg(target_os = "ios")]
++pub fn live_bytes() -> Option<usize> {
++    None
++}
++
++#[cfg(all(test, not(target_os = "ios")))]
+ mod tests {
+     use super::*;
+ 
+diff --git a/crates/horizon-threads/src/lib.rs b/crates/horizon-threads/src/lib.rs
+index 5328a4f..a070f69 100644
+--- a/crates/horizon-threads/src/lib.rs
++++ b/crates/horizon-threads/src/lib.rs
+@@ -540,9 +540,16 @@ pub fn catch_stop_signals() {}
+ /// On Linux it samples allocations while a capture runs (`heap_sample`).
+ #[cfg(all(target_os = "linux", not(feature = "test-allocation-count")))]
+ pub type Allocator = heap_sample::SamplingAllocator;
+-#[cfg(all(not(target_os = "linux"), not(feature = "test-allocation-count")))]
++#[cfg(all(
++    not(target_os = "linux"),
++    not(target_os = "ios"),
++    not(feature = "test-allocation-count")
++))]
+ pub type Allocator = mimalloc::MiMalloc;
+-/// The game's mimalloc allocator.
++/// iOS has no mimalloc build; the system heap is the game's allocator there.
++#[cfg(all(target_os = "ios", not(feature = "test-allocation-count")))]
++pub type Allocator = std::alloc::System;
++/// The game's allocator.
+ #[cfg(not(feature = "test-allocation-count"))]
+ pub const ALLOCATOR: Allocator = Allocator {};
+ 
+@@ -575,6 +582,7 @@ pub fn heap_tag(name: &'static str) -> Option<heap_census::Tag> {
+ 
+ /// `mi_option_purge_delay` in mimalloc.h (index 15 in v2 and v3); the bindings
+ /// don't name it.
++#[cfg(not(target_os = "ios"))]
+ const PURGE_DELAY: libmimalloc_sys::mi_option_t = 15;
+ /// `mi_option_allow_thp` in mimalloc.h (index 43 in v3); unnamed in the bindings too.
+ #[cfg(target_os = "linux")]
+@@ -591,37 +599,30 @@ const ALLOW_THP: libmimalloc_sys::mi_option_t = 43;
+ /// 64 KiB mimalloc page in it is used: in a world at render distance 12 the
+ /// game held 200 MiB more that way, at the same load time and frame rate.
+ pub fn configure_allocator() {
+-    // SAFETY: sets one integer option, which mimalloc reads at each purge.
+-    unsafe {
+-        libmimalloc_sys::mi_option_set(PURGE_DELAY, 0);
+-    }
+-    #[cfg(target_os = "linux")]
+-    // SAFETY: an integer option mimalloc reads at each new mapping, and a prctl
+-    // that only sets this process's flag; the kernel reads it on each page fault,
+-    // so the arenas mapped before `main` take small pages from now on too.
+-    unsafe {
+-        libmimalloc_sys::mi_option_set(ALLOW_THP, 0);
+-        libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
++    #[cfg(not(target_os = "ios"))]
++    {
++        // SAFETY: sets one integer option, which mimalloc reads at each purge.
++        unsafe {
++            libmimalloc_sys::mi_option_set(PURGE_DELAY, 0);
++        }
++        #[cfg(target_os = "linux")]
++        // SAFETY: an integer option mimalloc reads at each new mapping, and a prctl
++        // that only sets this process's flag; the kernel reads it on each page fault,
++        // so the arenas mapped before `main` take small pages from now on too.
++        unsafe {
++            libmimalloc_sys::mi_option_set(ALLOW_THP, 0);
++            libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
++        }
+     }
+ }
+ 
+ /// The bytes the allocator has committed now and at its peak (mimalloc's
+ /// process info), for `horizon-ctl memory`.
+ pub fn allocator_commit() -> (usize, usize) {
+-    let mut info = [0usize; 8];
+-    let [
+-        elapsed,
+-        user,
+-        system,
+-        rss,
+-        peak_rss,
+-        commit,
+-        peak_commit,
+-        faults,
+-    ] = &mut info;
+-    // SAFETY: writes eight integers through pointers to them.
+-    unsafe {
+-        libmimalloc_sys::mi_process_info(
++    #[cfg(not(target_os = "ios"))]
++    {
++        let mut info = [0usize; 8];
++        let [
+             elapsed,
+             user,
+             system,
+@@ -630,9 +631,26 @@ pub fn allocator_commit() -> (usize, usize) {
+             commit,
+             peak_commit,
+             faults,
+-        );
++        ] = &mut info;
++        // SAFETY: writes eight integers through pointers to them.
++        unsafe {
++            libmimalloc_sys::mi_process_info(
++                elapsed,
++                user,
++                system,
++                rss,
++                peak_rss,
++                commit,
++                peak_commit,
++                faults,
++            );
++        }
++        (info[5], info[6])
++    }
++    #[cfg(target_os = "ios")]
++    {
++        (0, 0)
+     }
+-    (info[5], info[6])
+ }
+ 
+ /// Give back to the OS the memory the allocator holds free, after something
+@@ -640,6 +658,7 @@ pub fn allocator_commit() -> (usize, usize) {
+ /// native libraries still use: glibc keeps freed pages in the arena of the
+ /// thread that allocated them, and macOS in its zones until memory runs short.
+ pub fn release_free_memory() {
++    #[cfg(not(target_os = "ios"))]
+     // SAFETY: frees only pages no allocation uses (this thread's heap, shared arenas).
+     unsafe {
+         libmimalloc_sys::mi_collect(true);
