@@ -126,7 +126,31 @@ public final class ClientMain {
         } catch (Throwable error) {
             System.out.println("cannot configure headless glfw: " + error);
         }
-        createOsmesaContext();
+        createProbeContext();
+    }
+
+    /**
+     * GLFW owns the OSMesa context, so a hidden window is created up front and made current.
+     * That is what the early window used to do for sodium's class initialisation.
+     */
+    private static void createProbeContext() {
+        try {
+            org.lwjgl.glfw.GLFW.glfwWindowHint(org.lwjgl.glfw.GLFW.GLFW_VISIBLE, org.lwjgl.glfw.GLFW.GLFW_FALSE);
+            if (!org.lwjgl.glfw.GLFW.glfwInit()) {
+                System.out.println("glfw: init failed");
+                return;
+            }
+            long window = org.lwjgl.glfw.GLFW.glfwCreateWindow(1280, 720, "b1-probe", 0L, 0L);
+            if (window == 0L) {
+                System.out.println("glfw: probe window creation failed");
+                return;
+            }
+            org.lwjgl.glfw.GLFW.glfwMakeContextCurrent(window);
+            System.out.println("glfw: probe context current, GL = "
+                    + org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_VERSION));
+        } catch (Throwable error) {
+            System.out.println("cannot create probe context: " + error);
+        }
     }
 
     /**
@@ -134,26 +158,4 @@ public final class ClientMain {
      * creates its window, because FML's early window would normally have made a context current.
      * Creating and binding an OSMesa context here gives those calls somewhere to go.
      */
-    private static void createOsmesaContext() {
-        try {
-            Class<?> osmesaClass = Class.forName("org.lwjgl.opengl.OSMesa");
-            int rgba = osmesaClass.getField("OSMESA_RGBA").getInt(null);
-            long context = (Long) osmesaClass.getMethod("OSMesaCreateContextExt",
-                    int.class, int.class, int.class, int.class, long.class)
-                    .invoke(null, rgba, 24, 8, 0, 0L);
-            if (context == 0L) {
-                System.out.println("osmesa: context creation returned null");
-                return;
-            }
-            java.nio.ByteBuffer buffer = java.nio.ByteBuffer
-                    .allocateDirect(1280 * 720 * 4)
-                    .order(java.nio.ByteOrder.nativeOrder());
-            boolean current = (Boolean) osmesaClass.getMethod("OSMesaMakeCurrent",
-                    long.class, java.nio.ByteBuffer.class, int.class, int.class, int.class)
-                    .invoke(null, context, buffer, 0x1401 /* GL_UNSIGNED_BYTE */, 1280, 720);
-            System.out.println("osmesa: context=" + context + " current=" + current);
-        } catch (Throwable error) {
-            System.out.println("cannot create osmesa context: " + error);
-        }
-    }
 }
