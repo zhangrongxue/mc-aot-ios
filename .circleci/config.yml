@@ -58,7 +58,7 @@ jobs:
             cd ~/b1
             cp "$CIRCLE_WORKING_DIRECTORY/b1/n05/BootstrapSmoke.java" .
             javac -cp graph.jar -d . BootstrapSmoke.java || echo "javac failed"
-            ( native-image -cp "graph.jar:." -H:+ReportExceptionStackTraces -J-Xmx6g \
+            ( native-image -cp "graph.jar:." -H:+ReportExceptionStackTraces -J-Xmx20g \
                 --no-fallback -o b1bootstrap BootstrapSmoke > native-image.log 2>&1 ) &
             NI_PID=$!
             i=0
