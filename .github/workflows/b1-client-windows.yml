@@ -14,7 +14,7 @@ on:
 
 jobs:
   windows-client-image:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 90
     env:
       GRAPH_REPO: zhangrongxue/mc-aot-sign
@@ -57,7 +57,9 @@ jobs:
       - name: Build the client image
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
+          if not defined VSPATH exit /b 1
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
           where cl
           set PROCESSOR_ARCHITECTURE=AMD64
           "%GRAAL_HOME%\bin\javac.exe" -proc:none -cp graph.jar -d . b1\n05\ClientMain.java
