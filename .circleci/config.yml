@@ -94,7 +94,13 @@ jobs:
             echo "---- run (no GPU: GLFW failure is expected) ----"
             if [ -x b1client ]; then
               echo "IMAGE BUILT: $(ls -lh b1client | awk '{print $5}')"
-              ( ./b1client > client-run.log 2>&1 & echo $! > client.pid ; sleep 150 ; kill $(cat client.pid) 2>/dev/null ) || true
+              # LWJGL natives: the image has no jars to extract them from
+            mkdir -p natives
+            for m in lwjgl lwjgl-glfw lwjgl-opengl lwjgl-stb lwjgl-tinyfd lwjgl-openal lwjgl-jemalloc lwjgl-freetype; do
+              curl -fsSL -o "/tmp/$m.jar" "https://repo1.maven.org/maven2/org/lwjgl/$m/3.3.3/$m-3.3.3-natives-macos-arm64.jar" && unzip -oq "/tmp/$m.jar" -d natives || true
+            done
+            echo "natives: $(ls natives/*.dylib 2>/dev/null | wc -l | tr -d ' ')"
+            ( B1_NATIVES="$PWD/natives" ./b1client > client-run.log 2>&1 & echo $! > client.pid ; sleep 150 ; kill $(cat client.pid) 2>/dev/null ) || true
               echo "---- client log ----"
               cat client-run.log 2>/dev/null | tail -60 || true
               echo "---- end ----"
