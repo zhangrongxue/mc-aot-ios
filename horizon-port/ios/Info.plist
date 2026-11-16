@@ -30,9 +30,13 @@
     <string>iphoneos</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
     <key>MinimumOSVersion</key>
     <string>15.0</string>
     <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+    <key>UIFileSharingEnabled</key>
     <true/>
     <key>UIDeviceFamily</key>
     <array>
