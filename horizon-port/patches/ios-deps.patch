@@ -1,0 +1,238 @@
+diff --git a/crates/horizon-client-input/Cargo.toml b/crates/horizon-client-input/Cargo.toml
+index 4709566..917c75d 100644
+--- a/crates/horizon-client-input/Cargo.toml
++++ b/crates/horizon-client-input/Cargo.toml
+@@ -10,9 +10,11 @@ description = "The client's input layer: key bindings and their names, mouse, co
+ horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
+ horizon-engine-slots = { path = "../horizon-engine-slots" }
+ horizon-client-core = { path = "../horizon-client-core" }
+-winit = "0.30.13"
++winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
+ log = "0.4"
+ png = "0.18"
++
++[target.'cfg(not(target_os = "ios"))'.dependencies]
+ arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
+ 
+ [dev-dependencies]
+diff --git a/crates/horizon-client-input/src/clipboard.rs b/crates/horizon-client-input/src/clipboard.rs
+index 5bf088a..9b97b25 100644
+--- a/crates/horizon-client-input/src/clipboard.rs
++++ b/crates/horizon-client-input/src/clipboard.rs
+@@ -3,7 +3,9 @@
+ //! `isCopy`, `isPaste` and `isCut`, `StringUtil.filterText` and
+ //! `ChatFormatting.stripFormatting`.
+ 
+-use std::cell::{RefCell, RefMut};
++use std::cell::RefCell;
++#[cfg(not(target_os = "ios"))]
++use std::cell::RefMut;
+ use winit::keyboard::{Key, KeyCode, PhysicalKey};
+ 
+ /// A text-editing shortcut (`InputWithModifiers.isSelectAll`, `isCopy`,
+@@ -128,6 +130,7 @@ pub trait Clipboard {
+ /// It reads and writes through `&self`, as a mod's `ClientHost` reaches it.
+ #[derive(Default)]
+ pub struct SystemClipboard {
++    #[cfg(not(target_os = "ios"))]
+     system: RefCell<Option<arboard::Clipboard>>,
+     /// The text Horizon last copied (`horizon-ctl status`).
+     copied: RefCell<Option<String>>,
+@@ -139,6 +142,7 @@ impl SystemClipboard {
+         self.copied.borrow().clone()
+     }
+     /// The system clipboard, connected on first use.
++    #[cfg(not(target_os = "ios"))]
+     fn system(&self) -> RefMut<'_, Option<arboard::Clipboard>> {
+         let mut system = self.system.borrow_mut();
+         if system.is_none() {
+@@ -148,19 +152,26 @@ impl SystemClipboard {
+     }
+     /// `KeyboardHandler.getClipboard`: empty when there is no text.
+     pub fn text(&self) -> String {
+-        let mut system = self.system();
+-        let Some(board) = system.as_mut() else {
+-            return self.copied().unwrap_or_default();
+-        };
+-        match board.get_text() {
+-            Ok(text) => text,
+-            Err(arboard::Error::ContentNotAvailable) => String::new(),
+-            Err(_) => {
+-                // A lost connection (a restarted compositor): reconnect next time.
+-                *system = None;
+-                String::new()
++        #[cfg(not(target_os = "ios"))]
++        {
++            let mut system = self.system();
++            let Some(board) = system.as_mut() else {
++                return self.copied().unwrap_or_default();
++            };
++            match board.get_text() {
++                Ok(text) => text,
++                Err(arboard::Error::ContentNotAvailable) => String::new(),
++                Err(_) => {
++                    // A lost connection (a restarted compositor): reconnect next time.
++                    *system = None;
++                    String::new()
++                }
+             }
+         }
++        #[cfg(target_os = "ios")]
++        {
++            self.copied().unwrap_or_default()
++        }
+     }
+     /// `KeyboardHandler.setClipboard`: empty text is not copied.
+     pub fn set_text(&self, text: &str) {
+@@ -168,11 +179,14 @@ impl SystemClipboard {
+             return;
+         }
+         *self.copied.borrow_mut() = Some(text.to_owned());
+-        let mut system = self.system();
+-        if let Some(board) = system.as_mut()
+-            && board.set_text(text.to_owned()).is_err()
++        #[cfg(not(target_os = "ios"))]
+         {
+-            *system = None;
++            let mut system = self.system();
++            if let Some(board) = system.as_mut()
++                && board.set_text(text.to_owned()).is_err()
++            {
++                *system = None;
++            }
+         }
+     }
+ }
+diff --git a/crates/horizon-client-lib/Cargo.toml b/crates/horizon-client-lib/Cargo.toml
+index ed7d483..3136fdb 100644
+--- a/crates/horizon-client-lib/Cargo.toml
++++ b/crates/horizon-client-lib/Cargo.toml
+@@ -60,7 +60,7 @@ horizon-narrator = { path = "../horizon-narrator" }
+ # Their runtime is the `mods` feature.
+ horizon-mod-package = { path = "../horizon-mod-package", default-features = false, features = ["index"] }
+ wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
+-winit = "0.30.13"
++winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
+ pollster = "0.4"
+ bytemuck = { version = "1.24", features = ["derive"] }
+ glam = "0.30"
+@@ -116,7 +116,10 @@ objc2 = "0.6"
+ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow", "NSScreen"] }
+ objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString"] }
+ 
+-[target.'cfg(not(target_os = "macos"))'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
++winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
++
++[target.'cfg(all(not(target_os = "macos"), not(target_os = "ios")))'.dependencies]
+ # OpenGL (WGL on Windows, EGL on Linux), the last fallback, for GPUs with no Vulkan or
+ # DirectX 12 driver (`graphicsApi`, graphics.rs).
+ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
+diff --git a/crates/horizon-client-render/Cargo.toml b/crates/horizon-client-render/Cargo.toml
+index a9121f7..a25b61b 100644
+--- a/crates/horizon-client-render/Cargo.toml
++++ b/crates/horizon-client-render/Cargo.toml
+@@ -64,7 +64,7 @@ symphonia = { version = "0.5", default-features = false, features = ["ogg", "vor
+ unicode-bidi = "0.3.18"
+ ureq = { version = "2", default-features = false, features = ["tls"] }
+ wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
+-winit = "0.30.13"
++winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
+ zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
+ 
+ [target.'cfg(unix)'.dependencies]
+@@ -73,7 +73,10 @@ rustix = { version = "1", default-features = false, features = ["std", "time"] }
+ [target.'cfg(windows)'.dependencies]
+ wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
+ 
+-[target.'cfg(not(target_os = "macos"))'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
++winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
++
++[target.'cfg(all(not(target_os = "macos"), not(target_os = "ios")))'.dependencies]
+ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
+ 
+ [features]
+diff --git a/crates/horizon-client/Cargo.toml b/crates/horizon-client/Cargo.toml
+index 7b7a557..8b097d7 100644
+--- a/crates/horizon-client/Cargo.toml
++++ b/crates/horizon-client/Cargo.toml
+@@ -60,7 +60,7 @@ horizon-narrator = { path = "../horizon-narrator" }
+ # Their runtime is the `mods` feature.
+ horizon-mod-package = { path = "../horizon-mod-package", default-features = false, features = ["index", "runtime-process"] }
+ wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
+-winit = "0.30.13"
++winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
+ pollster = "0.4"
+ bytemuck = { version = "1.24", features = ["derive"] }
+ glam = "0.30"
+@@ -120,7 +120,10 @@ objc2 = "0.6"
+ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow", "NSScreen"] }
+ objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString"] }
+ 
+-[target.'cfg(not(target_os = "macos"))'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))'.dependencies]
++winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
++
++[target.'cfg(all(not(target_os = "macos"), not(target_os = "ios")))'.dependencies]
+ # OpenGL (WGL on Windows, EGL on Linux), the last fallback, for GPUs with no Vulkan or
+ # DirectX 12 driver (`graphicsApi`, graphics.rs).
+ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
+diff --git a/crates/horizon-hdr/Cargo.toml b/crates/horizon-hdr/Cargo.toml
+index bd16669..9d5ba23 100644
+--- a/crates/horizon-hdr/Cargo.toml
++++ b/crates/horizon-hdr/Cargo.toml
+@@ -9,7 +9,7 @@ description = "HDR metadata for the swapchain: the Vulkan calls the crates that
+ [dependencies]
+ wgpu = { version = "30.0.1", default-features = false, features = ["vulkan"] }
+ 
+-[target.'cfg(not(target_os = "macos"))'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+ # The version wgpu-hal already uses.
+ ash = { version = "0.38", default-features = false }
+ 
+diff --git a/crates/horizon-hdr/src/lib.rs b/crates/horizon-hdr/src/lib.rs
+index 4c35972..033a46a 100644
+--- a/crates/horizon-hdr/src/lib.rs
++++ b/crates/horizon-hdr/src/lib.rs
+@@ -9,7 +9,7 @@ pub mod wayland;
+ /// Opens a Vulkan device with `VK_EXT_hdr_metadata` too, when the GPU offers
+ /// it, so [`set_metadata`] can tell the compositor the real peak brightness.
+ /// `None` leaves opening to wgpu.
+-#[cfg(not(target_os = "macos"))]
++#[cfg(any(target_os = "linux", target_os = "windows"))]
+ pub fn open_vulkan_device(
+     adapter: &wgpu::Adapter,
+     desc: &wgpu::DeviceDescriptor<'_>,
+@@ -60,7 +60,7 @@ pub fn experimental_features() -> wgpu::ExperimentalFeatures {
+ /// content is BT.709, peaks at `peak` nits and is no darker than `black`. Needs a
+ /// device from `open_vulkan_device` and a configured surface; does nothing otherwise.
+ pub fn set_metadata(device: &wgpu::Device, surface: &wgpu::Surface<'_>, peak: f32, black: f32) {
+-    #[cfg(not(target_os = "macos"))]
++    #[cfg(any(target_os = "linux", target_os = "windows"))]
+     {
+         use wgpu::hal::api::Vulkan;
+         // Safety: read-only access to handles wgpu keeps alive while these guards live.
+@@ -87,11 +87,11 @@ pub fn set_metadata(device: &wgpu::Device, surface: &wgpu::Surface<'_>, peak: f3
+         // Safety: a live swapchain of this device, one metadata entry for it.
+         unsafe { loader.set_hdr_metadata(&[swapchain], &[metadata(peak, black)]) };
+     }
+-    #[cfg(target_os = "macos")]
++    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+     let _ = (device, surface, peak, black);
+ }
+ 
+-#[cfg(not(target_os = "macos"))]
++#[cfg(any(target_os = "linux", target_os = "windows"))]
+ fn metadata(peak: f32, black: f32) -> ash::vk::HdrMetadataEXT<'static> {
+     let xy = |x, y| ash::vk::XYColorEXT { x, y };
+     ash::vk::HdrMetadataEXT::default()
+@@ -107,7 +107,7 @@ fn metadata(peak: f32, black: f32) -> ash::vk::HdrMetadataEXT<'static> {
+         .max_frame_average_light_level(0.0)
+ }
+ 
+-#[cfg(all(test, not(target_os = "macos")))]
++#[cfg(all(test, any(target_os = "linux", target_os = "windows")))]
+ mod tests {
+     #[test]
+     fn the_frame_average_is_sent_as_unknown() {
