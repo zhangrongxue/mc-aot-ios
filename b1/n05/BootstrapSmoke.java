@@ -22,7 +22,24 @@ public final class BootstrapSmoke {
         // DataFixers dies with "Game version not set".
         net.minecraft.SharedConstants.tryDetectVersion();
         System.out.println("game version: " + net.minecraft.SharedConstants.getCurrentVersion().getName());
-        net.minecraft.server.Bootstrap.bootStrap();
+        try {
+            net.minecraft.server.Bootstrap.bootStrap();
+        } catch (Throwable error) {
+            // Print the whole chain: the CI log otherwise ends at "Exception in thread main".
+            System.out.println("BOOTSTRAP FAILED: " + error);
+            Throwable cause = error.getCause();
+            int depth = 0;
+            while (cause != null && depth < 8) {
+                System.out.println("  caused by: " + cause);
+                for (StackTraceElement element : cause.getStackTrace()) {
+                    System.out.println("      at " + element);
+                }
+                cause = cause.getCause();
+                depth++;
+            }
+            System.out.flush();
+            return;
+        }
         long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
         System.out.println("bootstrap ms=" + elapsedMs);
         System.out.println("blocks=" + net.minecraft.core.registries.BuiltInRegistries.BLOCK.size());
