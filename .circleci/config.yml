@@ -29,6 +29,22 @@ jobs:
             cd /tmp/horizon
             git rev-parse HEAD
       - run:
+          name: Apply iOS port patch
+          command: |
+            set -euxo pipefail
+            cd /tmp/horizon
+            git apply "$CIRCLE_WORKING_DIRECTORY/horizon-port/patches/ios-deps.patch"
+            git diff --stat
+      - run:
+          name: Diagnose horizon-client-lib for iOS
+          no_output_timeout: 30m
+          command: |
+            set +e
+            . "$HOME/.cargo/env"
+            cd /tmp/horizon
+            cargo check -p horizon-client-lib --target aarch64-apple-ios --no-default-features 2>&1 | tee /tmp/clientlib-check.log
+            echo "clientlib check exit: ${PIPESTATUS[0]}"
+      - run:
           name: Build iOS static library
           no_output_timeout: 30m
           command: |
@@ -47,7 +63,7 @@ jobs:
       - store_artifacts:
           path: /tmp/staticlib.log
       - store_artifacts:
-          path: horizon-port/build
+          path: /tmp/clientlib-check.log
 workflows:
   horizon-ios-dev:
     jobs:
