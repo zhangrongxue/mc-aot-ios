@@ -37,10 +37,19 @@ extern int horizon_ios_self_test(void);
     body.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
     body.numberOfLines = 0;
     body.textAlignment = NSTextAlignmentLeft;
-    body.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.055];
-    body.layer.cornerRadius = 12.0;
-    body.layer.masksToBounds = YES;
-    body.layoutMargins = UIEdgeInsetsMake(16, 16, 16, 16);
+    body.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIView *bodyCard = [[UIView alloc] init];
+    bodyCard.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.055];
+    bodyCard.layer.cornerRadius = 12.0;
+    bodyCard.layer.masksToBounds = YES;
+    [bodyCard addSubview:body];
+    [NSLayoutConstraint activateConstraints:@[
+        [body.leadingAnchor constraintEqualToAnchor:bodyCard.leadingAnchor constant:16.0],
+        [body.trailingAnchor constraintEqualToAnchor:bodyCard.trailingAnchor constant:-16.0],
+        [body.topAnchor constraintEqualToAnchor:bodyCard.topAnchor constant:16.0],
+        [body.bottomAnchor constraintEqualToAnchor:bodyCard.bottomAnchor constant:-16.0],
+    ]];
 
     UILabel *footer = [[UILabel alloc] init];
     footer.text = [NSString stringWithFormat:@"core self-test: %@\nUnofficial build · no Mojang assets bundled",
@@ -50,7 +59,7 @@ extern int horizon_ios_self_test(void);
     footer.numberOfLines = 0;
     footer.textAlignment = NSTextAlignmentCenter;
 
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[ title, subtitle, body, footer ]];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[ title, subtitle, bodyCard, footer ]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 18.0;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
