@@ -1,0 +1,75 @@
+name: B1 client image (Windows)
+
+# Builds the NeoForge 1.21.1 client native image on a Windows runner, which has MSVC and 16 GB
+# of RAM - the combination this machine lacks. The class graph and the overrides layer live in a
+# private release, fetched with GH_PAT.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [build/b1-n0]
+    paths:
+      - ".github/workflows/b1-client-windows.yml"
+      - "b1/**"
+
+jobs:
+  windows-client-image:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      GRAPH_REPO: zhangrongxue/mc-aot-sign
+      GRAPH_TAG: b1-client-graph3
+      OVERRIDES_TAG: b1-overrides
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GraalVM 21
+        shell: pwsh
+        run: |
+          $url = "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-21.0.2/graalvm-community-jdk-21.0.2_windows-x64_bin.zip"
+          curl.exe -sSL -o graalvm.zip $url
+          Expand-Archive graalvm.zip -DestinationPath C:\graal
+          $home = (Get-ChildItem C:\graal -Directory | Select-Object -First 1).FullName
+          "GRAAL_HOME=$home" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & "$home\bin\java.exe" -version
+
+      - name: Fetch the graph and overrides
+        shell: pwsh
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          $headers = @{ Authorization = "token $env:GH_PAT"; "User-Agent" = "dsh" }
+          $graph = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GRAPH_REPO/releases/tags/$env:GRAPH_TAG"
+          $asset = $graph.assets[0]
+          Invoke-WebRequest -Headers (@{ Authorization = "token $env:GH_PAT"; "User-Agent" = "dsh"; Accept = "application/octet-stream" }) -Uri $asset.url -OutFile graph.tgz
+          tar -xzf graph.tgz -C .
+          $over = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GRAPH_REPO/releases/tags/$env:OVERRIDES_TAG"
+          if ($over.assets.Count -gt 0) {
+            Invoke-WebRequest -Headers (@{ Authorization = "token $env:GH_PAT"; "User-Agent" = "dsh"; Accept = "application/octet-stream" }) -Uri $over.assets[0].url -OutFile overrides.tgz
+            tar -xzf overrides.tgz -C .
+          }
+          Remove-Item -Recurse -Force java, jdk, sun, com\sun -ErrorAction SilentlyContinue
+          Get-ChildItem -Recurse -Filter module-info.class | Remove-Item -Force
+          Write-Host "classes: $((Get-ChildItem -Recurse -Filter *.class).Count)"
+          & "$env:GRAAL_HOME\bin\jar.exe" cf graph.jar -C . .
+          Get-Item graph.jar | Select-Object Length
+
+      - name: Build the client image
+        shell: pwsh
+        run: |
+          $reflect = @("b1-reflect-config.json", "b1-reflect-equals.json", "b1-reflect-plugins.json", "b1-reflect-services.json") |
+            Where-Object { Test-Path $_ } | ForEach-Object { (Resolve-Path $_).Path }
+          $reflectArg = "-H:ReflectionConfigurationFiles=" + ($reflect -join ",")
+          & "$env:GRAAL_HOME\bin\javac.exe" -proc:none -cp graph.jar -d . "b1\n05\ClientMain.java"
+          & "$env:GRAAL_HOME\bin\native-image.cmd" -Ob -cp "graph.jar;." -J-Xmx10g -J-XX:ActiveProcessorCount=4 `
+            $reflectArg -H:-CheckToolchain -H:IncludeResources=b1-config.* -H:IncludeResources=META-INF/services/.* `
+            --no-fallback -o b1client ClientMain
+          if ($LASTEXITCODE -ne 0) { throw "native-image failed" }
+          Get-Item b1client.exe | Select-Object Length
+
+      - name: Upload the image
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1client-windows
+          path: b1client.exe
+          retention-days: 14
