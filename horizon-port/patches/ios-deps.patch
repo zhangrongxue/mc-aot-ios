@@ -525,7 +525,7 @@ index 16664ff..8e70921 100644
      pub(super) fn pauses_game(&self) -> bool {
          self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..b9b81cb 100644
+index 2511aa2..5605d1c 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -3,6 +3,11 @@
@@ -587,7 +587,7 @@ index 2511aa2..b9b81cb 100644
      }
      pub(super) fn draw(&mut self) {
          let Some(size) = self
-@@ -419,6 +448,45 @@ pub(super) enum App {
+@@ -419,6 +448,48 @@ pub(super) enum App {
      Loading(Box<Loading>),
      Ready(Box<split::Split<'static>>),
  }
@@ -616,11 +616,14 @@ index 2511aa2..b9b81cb 100644
 +        ],
 +        winit::event::TouchPhase::Moved => vec![cursor],
 +        winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
-+            vec![WindowEvent::MouseInput {
-+                device_id,
-+                state: winit::event::ElementState::Released,
-+                button: winit::event::MouseButton::Left,
-+            }]
++            vec![
++                cursor,
++                WindowEvent::MouseInput {
++                    device_id,
++                    state: winit::event::ElementState::Released,
++                    button: winit::event::MouseButton::Left,
++                },
++            ]
 +        },
 +    })
 +}
@@ -633,7 +636,7 @@ index 2511aa2..b9b81cb 100644
  impl ApplicationHandler for App {
      fn resumed(&mut self, event_loop: &ActiveEventLoop) {
          match self {
-@@ -427,6 +495,38 @@ impl ApplicationHandler for App {
+@@ -427,6 +498,38 @@ impl ApplicationHandler for App {
          }
      }
      fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -733,7 +736,7 @@ index ee73abf..3704fed 100644
      pub(super) fn facts(&self) -> &BlockFacts {
          &self.core.facts
 diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
-index 6a86a75..b3d5a8a 100644
+index 6a86a75..a3d6bf8 100644
 --- a/crates/horizon-client/src/game/runtime/window_handler.rs
 +++ b/crates/horizon-client/src/game/runtime/window_handler.rs
 @@ -2,6 +2,10 @@
@@ -747,17 +750,23 @@ index 6a86a75..b3d5a8a 100644
  impl Game<'_> {
      /// A run that a person's stray key, click or mouse move would spoil: a screenshot sequence, a
      /// `HORIZON_TICK_SCRIPT` scenario or a `record-replay`. While one runs, the keyboard, mouse
-@@ -315,6 +319,9 @@ impl Game<'_> {
+@@ -315,6 +319,15 @@ impl Game<'_> {
          if self.pending_save.is_some() {
              return;
          }
 +        if self.screen == Screen::Playing {
 +            self.pad.inject_state(self.touch.poll_state());
++        } else {
++            // A finger can open a menu while it is still down. Clear the
++            // touch pad before the menu's mouse/keyboard input, or the last
++            // button stays held and the next screen looks like pad mode.
++            self.touch.clear();
++            self.pad.inject_state(Default::default());
 +        }
          horizon_client::spans::time("pads", || self.poll_pads(event_loop));
          self.settle_after_run(event_loop);
          self.pause_if_inactive();
-@@ -325,10 +332,22 @@ impl Game<'_> {
+@@ -325,10 +338,22 @@ impl Game<'_> {
              event_loop.exit();
              return;
          }
@@ -781,7 +790,7 @@ index 6a86a75..b3d5a8a 100644
                  let id = w.id();
                  self.handle_window_event(
                      event_loop,
-@@ -351,11 +370,23 @@ impl Game<'_> {
+@@ -351,11 +376,23 @@ impl Game<'_> {
          }
          // Consume the last frame's result: a hidden compositor may stop sending
          // redraws altogether, leaving a successful result stale indefinitely.
@@ -807,7 +816,7 @@ index 6a86a75..b3d5a8a 100644
      }
  }
  
-@@ -437,14 +468,13 @@ impl ApplicationHandler for Game<'_> {
+@@ -437,14 +474,13 @@ impl ApplicationHandler for Game<'_> {
          };
          self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
          if let Some((event, modifiers)) = key {
