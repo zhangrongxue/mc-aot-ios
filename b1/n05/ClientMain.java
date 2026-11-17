@@ -13,7 +13,22 @@ import java.nio.file.Paths;
  */
 public final class ClientMain {
     public static void main(String[] args) throws Exception {
-        System.out.println("B1 client-entry smoke (build 3)");
+        // GLFW's WGL path and the drivers it loads use deep native stacks; the substrate main
+        // thread's default was enough for the bootstrap but not for the GL initialisation.
+        Thread worker = new Thread(null, () -> {
+            try {
+                run(args);
+            } catch (Throwable error) {
+                System.out.println("CLIENT FAILED: " + error);
+                error.printStackTrace(System.out);
+            }
+        }, "b1-main", 256L * 1024L * 1024L);
+        worker.start();
+        worker.join();
+    }
+
+    private static void run(String[] args) throws Exception {
+        System.out.println("B1 client-entry smoke (build 4)");
         Path gameDir = Paths.get(System.getProperty("user.dir"), "run");
         Files.createDirectories(gameDir.resolve("config"));
         Files.createDirectories(gameDir.resolve("mods"));
