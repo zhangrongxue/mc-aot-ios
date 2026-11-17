@@ -55,6 +55,21 @@ public final class ClientMain {
             System.out.println("blocks=" + net.minecraft.core.registries.BuiltInRegistries.BLOCK.size());
             return;
         }
+        if (stage != null && stage.equals("glfw")) {
+            // Second bisection step: does LWJGL's GLFW work inside the image at all?
+            System.out.println("glfw stage: init=" + org.lwjgl.glfw.GLFW.glfwInit());
+            org.lwjgl.glfw.GLFW.glfwWindowHint(org.lwjgl.glfw.GLFW.GLFW_VISIBLE, org.lwjgl.glfw.GLFW.GLFW_FALSE);
+            long handle = org.lwjgl.glfw.GLFW.glfwCreateWindow(320, 240, "b1", 0L, 0L);
+            System.out.println("glfw stage: window=" + handle);
+            if (handle != 0L) {
+                org.lwjgl.glfw.GLFW.glfwMakeContextCurrent(handle);
+                System.out.println("glfw stage: GL_VERSION="
+                        + org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_VERSION));
+                org.lwjgl.glfw.GLFW.glfwDestroyWindow(handle);
+            }
+            org.lwjgl.glfw.GLFW.glfwTerminate();
+            return;
+        }
         net.minecraft.client.main.Main.main(clientArgs);
     }
 
