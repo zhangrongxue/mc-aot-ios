@@ -87,14 +87,50 @@ public final class ClientMain {
             System.out.println("glfw stage: window=" + handle);
             if (handle != 0L) {
                 org.lwjgl.glfw.GLFW.glfwMakeContextCurrent(handle);
-                System.out.println("glfw stage: GL_VERSION="
-                        + org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_VERSION));
+                System.out.println("glfw stage: current=" + org.lwjgl.glfw.GLFW.glfwGetCurrentContext()
+                        + " ctxVersion=" + org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(handle, org.lwjgl.glfw.GLFW.GLFW_CONTEXT_VERSION_MAJOR)
+                        + "." + org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(handle, org.lwjgl.glfw.GLFW.GLFW_CONTEXT_VERSION_MINOR)
+                        + " clientApi=" + org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(handle, org.lwjgl.glfw.GLFW.GLFW_CLIENT_API));
                 org.lwjgl.glfw.GLFW.glfwDestroyWindow(handle);
             }
             org.lwjgl.glfw.GLFW.glfwTerminate();
             return;
         }
+        startCapabilitiesWatchdog();
         net.minecraft.client.main.Main.main(clientArgs);
+    }
+
+    /**
+     * Minecraft installs GL capabilities after creating its window. In the static runtime the
+     * early window is gone, so some GL use can happen before that; the function table is then a
+     * set of "missing function" stubs and the first call jumps into nowhere. This watchdog waits
+     * for a current context and installs the capabilities itself, whichever side gets there first.
+     */
+    private static void startCapabilitiesWatchdog() {
+        Thread watchdog = new Thread(() -> {
+            for (int attempt = 0; attempt < 1200; attempt++) {
+                try {
+                    long context = org.lwjgl.glfw.GLFW.glfwGetCurrentContext();
+                    if (context != 0L) {
+                        try {
+                            org.lwjgl.opengl.GL.getCapabilities();
+                        } catch (Throwable missing) {
+                            org.lwjgl.opengl.GLCapabilities caps = org.lwjgl.opengl.GL.createCapabilities();
+                            System.out.println("[b1] installed GL capabilities for context 0x"
+                                    + Long.toHexString(context) + " OpenGL32=" + caps.OpenGL32);
+                        }
+                        return;
+                    }
+                    Thread.sleep(25L);
+                } catch (InterruptedException interrupted) {
+                    return;
+                } catch (Throwable ignored) {
+                    // glfw may not be initialised yet
+                }
+            }
+        }, "b1-gl-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
     }
 
     private static void seedLoaderPaths(Path gameDir) {
