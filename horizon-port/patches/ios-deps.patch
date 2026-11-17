@@ -297,6 +297,65 @@ index f2d3b3a..4acedae 100644
          wgpu::Backends::GL => "OpenGL",
          _ => "graphics",
      }
+diff --git a/crates/horizon-client-render/src/touch/draw.rs b/crates/horizon-client-render/src/touch/draw.rs
+index 9e8d8e4..6ebe901 100644
+--- a/crates/horizon-client-render/src/touch/draw.rs
++++ b/crates/horizon-client-render/src/touch/draw.rs
+@@ -10,7 +10,6 @@
+ use super::{Control, Mode, Placement, Role, TouchControls, layout};
+ use crate::gamepad::{Button, PadState};
+ use crate::hud::{HudAtlas, HudBatch, rgba};
+-use crate::lang;
+ 
+ const BUTTON: &str = "gui/sprites/widget/button";
+ const BUTTON_HELD: &str = "gui/sprites/widget/button_highlighted";
+@@ -64,30 +63,26 @@ impl TouchControls {
+         })
+     }
+ 
+-    /// The label a control's button shows, in the player's language. Key
+-    /// names and symbols ("F3", "II") read the same in every language.
++    /// The label a control's button shows. The iOS port drives the game as a
++    /// keyboard and mouse, so it shows key names instead of controller glyphs.
+     fn label(&self, control: Control) -> String {
+-        let vertical = self.swimming || self.vertical_movement;
+         let key = match control {
+             Control::Move => return String::new(),
+-            Control::Pause => return "II".to_owned(),
+-            Control::Inventory => return "...".to_owned(),
+-            Control::Debug => return "F3".to_owned(),
+-            Control::Perspective => return "F5".to_owned(),
+-            Control::Sprint => "horizon.touch.sprint",
+-            Control::Jump if vertical => "horizon.touch.up",
+-            Control::Jump => "horizon.touch.jump",
+-            Control::Sneak if vertical => "horizon.touch.down",
+-            Control::Sneak if self.mounted => "horizon.touch.dismount",
+-            Control::Sneak => "horizon.touch.sneak",
+-            Control::Attack => "horizon.touch.attack",
+-            Control::Use => "horizon.touch.use",
+-            Control::Chat => "horizon.touch.chat",
+-            Control::Settings => "horizon.touch.settings",
+-            Control::Offhand => "horizon.touch.swap",
+-            Control::Shield => "horizon.touch.shield",
++            Control::Pause => "ESC",
++            Control::Inventory => "E",
++            Control::Debug => "F3",
++            Control::Perspective => "F5",
++            Control::Sprint => "CTRL",
++            Control::Jump => "SPACE",
++            Control::Sneak => "SHIFT",
++            Control::Attack => "LMB",
++            Control::Use => "RMB",
++            Control::Chat => "T",
++            Control::Settings => "F1",
++            Control::Offhand => "F",
++            Control::Shield => "RMB",
+         };
+-        lang::get(key)
++        key.to_owned()
+     }
+ 
+     /// The joystick (a rim and a knob) or the D-pad (four arrow buttons).
 diff --git a/crates/horizon-client/Cargo.toml b/crates/horizon-client/Cargo.toml
 index 7b7a557..8b097d7 100644
 --- a/crates/horizon-client/Cargo.toml
@@ -386,7 +445,7 @@ index 78cfdee..44bd551 100644
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
 diff --git a/crates/horizon-client/src/game.rs b/crates/horizon-client/src/game.rs
-index 55bd735..c23d97f 100644
+index 55bd735..2068649 100644
 --- a/crates/horizon-client/src/game.rs
 +++ b/crates/horizon-client/src/game.rs
 @@ -1189,6 +1189,8 @@ struct Game<'a> {
@@ -398,7 +457,7 @@ index 55bd735..c23d97f 100644
      frames: u64,
      /// The glint clock and options, read once per frame (game/interface/item_draw.rs).
      glint_frame: horizon_client::item_render::GlintFrame,
-@@ -5306,6 +5308,10 @@ impl Game<'_> {
+@@ -5306,6 +5308,17 @@ impl Game<'_> {
          self.draw_studio_bars(&mut batch);
          if show_hud {
              self.draw_pad_guide(&mut batch, guide_from);
@@ -406,10 +465,17 @@ index 55bd735..c23d97f 100644
 +                self.touch.viewport(batch.width as u32, batch.height as u32);
 +                self.touch.draw(&mut batch, &self.gui.atlas);
 +            }
++        }
++        // A visible pointer for touch menus: the finger drags this cursor and
++        // a lift clicks where it sits.
++        if self.screen != Screen::Playing {
++            let [x, y] = self.cursor;
++            batch.fill(&self.gui.atlas, x - 3.0, y - 3.0, 6.0, 6.0, rgba(0, 0, 0, 190));
++            batch.fill(&self.gui.atlas, x - 2.0, y - 2.0, 4.0, 4.0, rgba(255, 255, 255, 230));
          }
          batch
      }
-@@ -10741,6 +10747,7 @@ impl<'a> Game<'a> {
+@@ -10741,6 +10754,7 @@ impl<'a> Game<'a> {
              previous: now,
              last_input: now,
              pad: Default::default(),
