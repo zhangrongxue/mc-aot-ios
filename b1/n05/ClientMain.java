@@ -45,6 +45,16 @@ public final class ClientMain {
             "--height", "720",
         };
         System.out.println("starting net.minecraft.client.main.Main with " + clientArgs.length + " args");
+        String stage = System.getenv("B1_STAGE");
+        if (stage != null && stage.equals("bootstrap")) {
+            // Bisection aid: run the registry bootstrap only, so a crash here means the static
+            // runtime itself is at fault rather than the client's window/renderer path.
+            long started = System.nanoTime();
+            net.minecraft.server.Bootstrap.bootStrap();
+            System.out.println("bootstrap ok in " + ((System.nanoTime() - started) / 1_000_000L) + " ms");
+            System.out.println("blocks=" + net.minecraft.core.registries.BuiltInRegistries.BLOCK.size());
+            return;
+        }
         net.minecraft.client.main.Main.main(clientArgs);
     }
 
