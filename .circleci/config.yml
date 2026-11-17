@@ -2,7 +2,7 @@ version: 2.1
 jobs:
   horizon-ios-dev:
     macos:
-      xcode: "26.4.0"
+      xcode: "27.2.0"
     resource_class: m4pro.medium
     environment:
       HOMEBREW_NO_AUTO_UPDATE: "1"
