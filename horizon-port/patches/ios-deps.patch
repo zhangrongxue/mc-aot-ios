@@ -417,6 +417,21 @@ index 55bd735..c23d97f 100644
              frames: 0,
              glint_frame: Default::default(),
              kept_block_entities: Default::default(),
+diff --git a/crates/horizon-client/src/game/interface/ime.rs b/crates/horizon-client/src/game/interface/ime.rs
+index 22e0915..3775e5a 100644
+--- a/crates/horizon-client/src/game/interface/ime.rs
++++ b/crates/horizon-client/src/game/interface/ime.rs
+@@ -46,7 +46,9 @@ impl Game<'_> {
+ 
+     /// Allow the input method only while a text box has focus.
+     pub(super) fn sync_ime(&mut self) {
+-        let want = self.text_field_focused();
++        // iOS's system keyboard cannot be dismissed from the game and covers
++        // the screen; text fields take hardware keys only there.
++        let want = self.text_field_focused() && !cfg!(target_os = "ios");
+         if want != self.ime_allowed
+             && let Some(window) = &self.window
+         {
 diff --git a/crates/horizon-client/src/game/interface/pad/mod.rs b/crates/horizon-client/src/game/interface/pad/mod.rs
 index 026382e..c04f78b 100644
 --- a/crates/horizon-client/src/game/interface/pad/mod.rs
@@ -465,10 +480,10 @@ index 026382e..c04f78b 100644
              self.pad.in_use = true;
              self.pad.keyboard_took_over = false;
 diff --git a/crates/horizon-client/src/game/interface/pointer_capture.rs b/crates/horizon-client/src/game/interface/pointer_capture.rs
-index 16664ff..8e70921 100644
+index 16664ff..8252762 100644
 --- a/crates/horizon-client/src/game/interface/pointer_capture.rs
 +++ b/crates/horizon-client/src/game/interface/pointer_capture.rs
-@@ -55,6 +55,55 @@ impl Game<'_> {
+@@ -55,6 +55,65 @@ impl Game<'_> {
          let zoom = self.zoom_turn_scale();
          self.turn_player(x * zoom, y * zoom);
      }
@@ -488,15 +503,25 @@ index 16664ff..8e70921 100644
 +            |r| [r.config.width.max(1), r.config.height.max(1)],
 +        );
 +        self.touch.viewport(width, height);
++        // The touch position is in the full screen; the surface is the safe
++        // area inside it. Remove the safe-area inset (the notch/home bar).
++        let (inset_x, inset_y) = self.window.as_ref().map_or((0.0, 0.0), |w| {
++            let outer = w.outer_size();
++            (
++                ((outer.width as f64 - width as f64) / 2.0).max(0.0),
++                ((outer.height as f64 - height as f64) / 2.0).max(0.0),
++            )
++        });
 +        let point = [
-+            (touch.location.x as f32 / width as f32).clamp(0.0, 1.0),
-+            (touch.location.y as f32 / height as f32).clamp(0.0, 1.0),
++            ((touch.location.x - inset_x) as f32 / width as f32).clamp(0.0, 1.0),
++            ((touch.location.y - inset_y) as f32 / height as f32).clamp(0.0, 1.0),
 +        ];
 +        let started = touch.phase == winit::event::TouchPhase::Started;
 +        if started {
 +            log::info!(
-+                "Horizon: iOS touch point {:?} surface {width}x{height} control {:?}",
++                "Horizon: iOS touch point {:?} surface {width}x{height} inset {:?} control {:?}",
 +                point,
++                (inset_x, inset_y),
 +                self.touch.control_at(point)
 +            );
 +        }
@@ -525,7 +550,7 @@ index 16664ff..8e70921 100644
      pub(super) fn pauses_game(&self) -> bool {
          self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..5605d1c 100644
+index 2511aa2..6c26bf3 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -3,6 +3,11 @@
@@ -587,22 +612,19 @@ index 2511aa2..5605d1c 100644
      }
      pub(super) fn draw(&mut self) {
          let Some(size) = self
-@@ -419,6 +448,48 @@ pub(super) enum App {
+@@ -419,6 +448,45 @@ pub(super) enum App {
      Loading(Box<Loading>),
      Ready(Box<split::Split<'static>>),
  }
 +#[cfg(target_os = "ios")]
-+fn touch_as_mouse(event: &WindowEvent, scale: f64) -> Option<Vec<WindowEvent>> {
++fn touch_as_mouse(event: &WindowEvent, offset: (f64, f64)) -> Option<Vec<WindowEvent>> {
 +    let WindowEvent::Touch(touch) = event else {
 +        return None;
 +    };
 +    let device_id = touch.device_id.clone();
-+    // winit reports the touch in window space; the menus hit-test in the
-+    // renderer's larger surface. A 1:1 mapping made every menu tap land in
-+    // the top-left quarter.
 +    let position = winit::dpi::PhysicalPosition::new(
-+        touch.location.x * scale,
-+        touch.location.y * scale,
++        touch.location.x - offset.0,
++        touch.location.y - offset.1,
 +    );
 +    let cursor = WindowEvent::CursorMoved { device_id: device_id.clone(), position };
 +    Some(match touch.phase {
@@ -629,14 +651,14 @@ index 2511aa2..5605d1c 100644
 +}
 +
 +#[cfg(not(target_os = "ios"))]
-+fn touch_as_mouse(_event: &WindowEvent, _scale: f64) -> Option<Vec<WindowEvent>> {
++fn touch_as_mouse(_event: &WindowEvent, _offset: (f64, f64)) -> Option<Vec<WindowEvent>> {
 +    None
 +}
 +
  impl ApplicationHandler for App {
      fn resumed(&mut self, event_loop: &ActiveEventLoop) {
          match self {
-@@ -427,6 +498,38 @@ impl ApplicationHandler for App {
+@@ -427,6 +495,67 @@ impl ApplicationHandler for App {
          }
      }
      fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -664,9 +686,38 @@ index 2511aa2..5605d1c 100644
 +                }
 +            }
 +        }
-+        // Menus hit-test in the renderer surface; winit's touch position is
-+        // already in that same surface space.
-+        if let Some(events) = touch_as_mouse(&event, 1.0) {
++        // Menus hit-test in the renderer surface. The touch is in the full
++        // screen, so remove the safe-area inset before handing it over.
++        let offset = match self {
++            App::Ready(game) => {
++                let size = game
++                    .host
++                    .renderer
++                    .as_ref()
++                    .map_or([1, 1], |r| [r.config.width, r.config.height]);
++                game.host.window.as_ref().map_or((0.0, 0.0), |w| {
++                    let outer = w.outer_size();
++                    (
++                        ((outer.width as f64 - size[0] as f64) / 2.0).max(0.0),
++                        ((outer.height as f64 - size[1] as f64) / 2.0).max(0.0),
++                    )
++                })
++            }
++            App::Loading(loading) => {
++                let size = loading
++                    .renderer
++                    .as_ref()
++                    .map_or([1, 1], |r| [r.config.width, r.config.height]);
++                loading.window.as_ref().map_or((0.0, 0.0), |w| {
++                    let outer = w.outer_size();
++                    (
++                        ((outer.width as f64 - size[0] as f64) / 2.0).max(0.0),
++                        ((outer.height as f64 - size[1] as f64) / 2.0).max(0.0),
++                    )
++                })
++            }
++        };
++        if let Some(events) = touch_as_mouse(&event, offset) {
 +            for event in events {
 +                self.window_event(event_loop, id, event);
 +            }
