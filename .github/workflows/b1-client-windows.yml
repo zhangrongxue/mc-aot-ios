@@ -60,8 +60,9 @@ jobs:
             curl.exe -sSL -o "$m.jar" "$base/$m-3.4.3.jar"
             & "$env:GRAAL_HOME\bin\jar.exe" xf "$m.jar"
             curl.exe -sSL -o "$m-natives.jar" "$base/$m-3.4.3-natives-windows.jar"
-            Expand-Archive -Path "$m-natives.jar" -DestinationPath natives -Force -ErrorAction SilentlyContinue
-            if (-not $?) { Push-Location natives; & "$env:GRAAL_HOME\bin\jar.exe" xf "..\$m-natives.jar"; Pop-Location }
+            Push-Location natives
+            & "$env:GRAAL_HOME\bin\jar.exe" xf "..\$m-natives.jar"
+            Pop-Location
           }
           Get-ChildItem natives -Filter *.dll | Select-Object Name
           Write-Host "classes: $((Get-ChildItem -Recurse -Filter *.class).Count)"
