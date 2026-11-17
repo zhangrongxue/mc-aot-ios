@@ -483,7 +483,7 @@ index 16664ff..41d0bfb 100644
      pub(super) fn pauses_game(&self) -> bool {
          self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..6d148f4 100644
+index 2511aa2..cc74c5c 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -3,6 +3,11 @@
@@ -519,7 +519,7 @@ index 2511aa2..6d148f4 100644
          if let Err(error) = self.poll_menu_resources() {
              self.error = Some(error);
              event_loop.exit();
-@@ -265,7 +284,9 @@ impl Loading {
+@@ -265,13 +284,23 @@ impl Loading {
          }
          self.poll_menu_realms(event_loop);
          if let Some(w) = &self.window {
@@ -530,7 +530,22 @@ index 2511aa2..6d148f4 100644
                  self.draw();
              } else {
                  w.request_redraw();
-@@ -419,6 +440,39 @@ pub(super) enum App {
+             }
+         }
+-        event_loop.set_control_flow(ControlFlow::Poll);
++        if cfg!(target_os = "ios") {
++            // Direct drawing in `about_to_wait` would otherwise spin thousands
++            // of times a second; pace it like a display.
++            event_loop.set_control_flow(ControlFlow::WaitUntil(
++                std::time::Instant::now() + std::time::Duration::from_millis(16),
++            ));
++        } else {
++            event_loop.set_control_flow(ControlFlow::Poll);
++        }
+     }
+     pub(super) fn draw(&mut self) {
+         let Some(size) = self
+@@ -419,6 +448,39 @@ pub(super) enum App {
      Loading(Box<Loading>),
      Ready(Box<split::Split<'static>>),
  }
@@ -570,7 +585,7 @@ index 2511aa2..6d148f4 100644
  impl ApplicationHandler for App {
      fn resumed(&mut self, event_loop: &ActiveEventLoop) {
          match self {
-@@ -427,6 +481,22 @@ impl ApplicationHandler for App {
+@@ -427,6 +489,22 @@ impl ApplicationHandler for App {
          }
      }
      fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -594,13 +609,18 @@ index 2511aa2..6d148f4 100644
              App::Loading(loading) => loading.window_event(event_loop, id, event),
              App::Ready(game) => game.window_event(event_loop, id, event),
 diff --git a/crates/horizon-client/src/game/runtime/resource_load.rs b/crates/horizon-client/src/game/runtime/resource_load.rs
-index f644b7b..014f07f 100644
+index f644b7b..4dd5972 100644
 --- a/crates/horizon-client/src/game/runtime/resource_load.rs
 +++ b/crates/horizon-client/src/game/runtime/resource_load.rs
-@@ -783,10 +783,12 @@ pub(super) fn load_resources(
+@@ -782,11 +782,16 @@ pub(super) fn load_resources(
+                     started,
                      true,
                  )
-                 .map_err(|error| error.to_string())?;
+-                .map_err(|error| error.to_string())?;
++                .map_err(|error| {
++                    log::error!("Horizon: world rest failed: {error}");
++                    error.to_string()
++                })?;
 +                log::info!("Horizon: rest loader publishing");
                  resources
                      .rest
@@ -649,7 +669,7 @@ index ee73abf..3704fed 100644
      pub(super) fn facts(&self) -> &BlockFacts {
          &self.core.facts
 diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
-index 6a86a75..d88d341 100644
+index 6a86a75..b3d5a8a 100644
 --- a/crates/horizon-client/src/game/runtime/window_handler.rs
 +++ b/crates/horizon-client/src/game/runtime/window_handler.rs
 @@ -2,6 +2,10 @@
@@ -697,17 +717,33 @@ index 6a86a75..d88d341 100644
                  let id = w.id();
                  self.handle_window_event(
                      event_loop,
-@@ -351,6 +370,9 @@ impl Game<'_> {
+@@ -351,11 +370,23 @@ impl Game<'_> {
          }
          // Consume the last frame's result: a hidden compositor may stop sending
          // redraws altogether, leaving a successful result stale indefinitely.
+-        event_loop.set_control_flow(event_loop::redraw_flow(
 +        if heartbeat % 120 == 0 {
 +            log::info!("Horizon: iOS drawn {heartbeat} ok={}", self.frame_drawn);
 +        }
-         event_loop.set_control_flow(event_loop::redraw_flow(
++        let flow = event_loop::redraw_flow(
              &mut self.frame_drawn,
              self.options.offscreen,
-@@ -437,14 +459,13 @@ impl ApplicationHandler for Game<'_> {
+             Instant::now(),
+-        ));
++        );
++        if cfg!(target_os = "ios") {
++            // The frame is drawn directly in `AboutToWait`; cap it at 60 Hz
++            // instead of letting winit poll as fast as the CPU allows.
++            event_loop.set_control_flow(ControlFlow::WaitUntil(
++                Instant::now() + Duration::from_millis(16),
++            ));
++        } else {
++            event_loop.set_control_flow(flow);
++        }
+     }
+ }
+ 
+@@ -437,14 +468,13 @@ impl ApplicationHandler for Game<'_> {
          };
          self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
          if let Some((event, modifiers)) = key {
