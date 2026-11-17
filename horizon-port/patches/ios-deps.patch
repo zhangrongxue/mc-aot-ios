@@ -1094,3 +1094,81 @@ index 5328a4f..a070f69 100644
      // SAFETY: frees only pages no allocation uses (this thread's heap, shared arenas).
      unsafe {
          libmimalloc_sys::mi_collect(true);
+diff --git a/crates/horizon-world/src/fluid_definitions.rs b/crates/horizon-world/src/fluid_definitions.rs
+index b1ef89e..c2dbf14 100644
+--- a/crates/horizon-world/src/fluid_definitions.rs
++++ b/crates/horizon-world/src/fluid_definitions.rs
+@@ -33,6 +33,53 @@ pub struct FluidDefinition {
+ }
+ 
+ /// Decode the full export against the same registry; never publish a partial table.
++/// The pinned version's five built-in fluids, for a resource tree whose
++/// exporter predates the `fluid_state_definitions` export.
++fn vanilla_fluid_definitions() -> serde_json::Value {
++    serde_json::json!({
++        "fluid_state_definitions": {
++            "minecraft:empty": {
++                "properties": {},
++                "default": { "id": "minecraft:empty" }
++            },
++            "minecraft:flowing_water": {
++                "properties": {
++                    "falling": ["true", "false"],
++                    "level": ["1", "2", "3", "4", "5", "6", "7", "8"]
++                },
++                "default": {
++                    "properties": { "level": "1", "falling": "true" },
++                    "id": "minecraft:flowing_water"
++                }
++            },
++            "minecraft:water": {
++                "properties": { "falling": ["true", "false"] },
++                "default": {
++                    "properties": { "falling": "true" },
++                    "id": "minecraft:water"
++                }
++            },
++            "minecraft:flowing_lava": {
++                "properties": {
++                    "falling": ["true", "false"],
++                    "level": ["1", "2", "3", "4", "5", "6", "7", "8"]
++                },
++                "default": {
++                    "properties": { "level": "1", "falling": "true" },
++                    "id": "minecraft:flowing_lava"
++                }
++            },
++            "minecraft:lava": {
++                "properties": { "falling": ["true", "false"] },
++                "default": {
++                    "properties": { "falling": "true" },
++                    "id": "minecraft:lava"
++                }
++            }
++        }
++    })
++}
++
+ pub fn load(
+     value: &serde_json::Value,
+     fluids: &[&str],
+@@ -49,6 +96,19 @@ pub fn load(
+             FluidDefinitionLoadError::Invalid,
+         )
+     };
++    // A resource tree prepared before the fluid export has no table. The five
++    // vanilla fluids are fixed registry data; folding them in lets an older
++    // (already transferred) resource tree run without re-preparing 250 MB.
++    let synthesized;
++    let value = if value.get("fluid_state_definitions").is_some() {
++        value
++    } else {
++        log::warn!(
++            "Horizon: fluid_state_definitions missing; using the built-in vanilla fluids"
++        );
++        synthesized = vanilla_fluid_definitions();
++        &synthesized
++    };
+     let entries = value
+         .get("fluid_state_definitions")
+         .ok_or_else(|| {
