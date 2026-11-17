@@ -386,7 +386,7 @@ index 78cfdee..44bd551 100644
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
 diff --git a/crates/horizon-client/src/game.rs b/crates/horizon-client/src/game.rs
-index 55bd735..0df8976 100644
+index 55bd735..c23d97f 100644
 --- a/crates/horizon-client/src/game.rs
 +++ b/crates/horizon-client/src/game.rs
 @@ -1189,6 +1189,8 @@ struct Game<'a> {
@@ -394,7 +394,7 @@ index 55bd735..0df8976 100644
      /// Controllers (Horizon's own).
      pad: pad::Pads,
 +    /// On-screen controls for a touch screen (iOS).
-+    touch: horizon_client::touch::TouchControls,
++    touch: horizon_client_render::touch::TouchControls,
      frames: u64,
      /// The glint clock and options, read once per frame (game/interface/item_draw.rs).
      glint_frame: horizon_client::item_render::GlintFrame,
@@ -433,7 +433,7 @@ index 026382e..e4778cd 100644
      pub(super) fn inject_button(&mut self, button: Button, down: bool) {
          self.injected.set(button, down);
 diff --git a/crates/horizon-client/src/game/interface/pointer_capture.rs b/crates/horizon-client/src/game/interface/pointer_capture.rs
-index 16664ff..4b18e39 100644
+index 16664ff..41d0bfb 100644
 --- a/crates/horizon-client/src/game/interface/pointer_capture.rs
 +++ b/crates/horizon-client/src/game/interface/pointer_capture.rs
 @@ -55,6 +55,45 @@ impl Game<'_> {
@@ -466,7 +466,7 @@ index 16664ff..4b18e39 100644
 +            .touch
 +            .update(touch.id as u64, point, started, ended);
 +        if turns != [0.0, 0.0] {
-+            let degrees = horizon_client::touch::camera_delta(
++            let degrees = horizon_client_render::touch::camera_delta(
 +                turns,
 +                width,
 +                height,
@@ -483,7 +483,7 @@ index 16664ff..4b18e39 100644
      pub(super) fn pauses_game(&self) -> bool {
          self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..1bf6b64 100644
+index 2511aa2..86fd412 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -265,7 +265,9 @@ impl Loading {
@@ -545,8 +545,8 @@ index 2511aa2..1bf6b64 100644
 +        // fingers. Everywhere else a finger is a click for the menus.
 +        if let WindowEvent::Touch(touch) = &event {
 +            if let App::Ready(game) = self {
-+                if game.screen == Screen::Playing {
-+                    game.touch_event(touch);
++                if game.host.screen == Screen::Playing {
++                    game.host.touch_event(touch);
 +                    return;
 +                }
 +            }
