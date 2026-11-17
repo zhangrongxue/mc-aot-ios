@@ -1,14 +1,15 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index 52c624a..d16580a 100644
+index 52c624a..facc3ca 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -114,6 +114,9 @@ naga = { path = "third_party/naga" }
+@@ -114,6 +114,10 @@ naga = { path = "third_party/naga" }
  # game died before main on CPUs without it (Core 2, #7264; THIRD_PARTY_NOTICES.md). Drop this and
  # the folder once a libmimalloc-sys release has microsoft/mimalloc#1291's fix.
  libmimalloc-sys = { path = "third_party/libmimalloc-sys" }
-+# iOS 27 requires the UIScene life cycle. This branch is winit 0.30.13 plus the
-+# 73-line UIScene adoption patch from Blackfall-Labs, pinned by commit.
-+winit = { git = "https://github.com/Blackfall-Labs/winit", rev = "f22b1e0c38b5e6f56205b2429ffff30c1e92ce42" }
++# iOS 27 requires the UIScene life cycle and Metal redraws. This is winit
++# 0.30.13 plus Blackfall-Labs' UIScene adoption patch and a request_redraw fix
++# for wgpu's late CAMetalLayer installation.
++winit = { path = "third_party/winit" }
  
  # Line tables keep file:line in backtraces; full debug info made every
  # example and test binary hundreds of megabytes and slow to link.
