@@ -39,6 +39,7 @@ xcrun --sdk iphoneos clang \
     -isysroot "$SDK" \
     -fobjc-arc \
     -O2 \
+    -Wl,-stack_size,0xA000000 \
     -framework UIKit \
     -framework Foundation \
     -framework CoreFoundation \
