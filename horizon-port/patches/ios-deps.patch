@@ -433,24 +433,30 @@ index 026382e..e4778cd 100644
      pub(super) fn inject_button(&mut self, button: Button, down: bool) {
          self.injected.set(button, down);
 diff --git a/crates/horizon-client/src/game/interface/pointer_capture.rs b/crates/horizon-client/src/game/interface/pointer_capture.rs
-index 16664ff..c7b6e93 100644
+index 16664ff..81f11db 100644
 --- a/crates/horizon-client/src/game/interface/pointer_capture.rs
 +++ b/crates/horizon-client/src/game/interface/pointer_capture.rs
-@@ -55,6 +55,52 @@ impl Game<'_> {
+@@ -55,6 +55,58 @@ impl Game<'_> {
          let zoom = self.zoom_turn_scale();
          self.turn_player(x * zoom, y * zoom);
      }
 +    /// One finger on the on-screen controls: the joystick and buttons feed the
 +    /// virtual pad; a drag on the world turns the camera.
 +    pub(super) fn touch_event(&mut self, touch: &winit::event::Touch) {
-+        let [width, height] = self.renderer.as_ref().map_or_else(
++        // winit gives touch positions in the window's coordinate space. Use
++        // that same space here; the renderer's surface can be larger (its
++        // scale factor), which made every touch land at half the screen and
++        // only the centre buttons reachable at the edge.
++        let [width, height] = self.window.as_ref().map_or_else(
 +            || {
-+                self.window.as_ref().map_or([1, 1], |w| {
-+                    let size = w.inner_size();
-+                    [size.width.max(1), size.height.max(1)]
++                self.renderer.as_ref().map_or([1, 1], |r| {
++                    [r.config.width.max(1), r.config.height.max(1)]
 +                })
 +            },
-+            |r| [r.config.width.max(1), r.config.height.max(1)],
++            |w| {
++                let size = w.inner_size();
++                [size.width.max(1), size.height.max(1)]
++            },
 +        );
 +        self.touch.viewport(width, height);
 +        let point = [
