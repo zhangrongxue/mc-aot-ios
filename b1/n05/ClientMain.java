@@ -58,6 +58,10 @@ public final class ClientMain {
         if (stage != null && stage.equals("glfw")) {
             // Second bisection step: does LWJGL's GLFW work inside the image at all?
             System.out.println("glfw stage: init=" + org.lwjgl.glfw.GLFW.glfwInit());
+            System.out.println("glfw stage: version=" + org.lwjgl.glfw.GLFW.glfwGetVersionString()
+                    + " time=" + org.lwjgl.glfw.GLFW.glfwGetTime());
+            org.lwjgl.glfw.GLFW.glfwPollEvents();
+            System.out.println("glfw stage: jni calls ok");
             org.lwjgl.glfw.GLFW.glfwWindowHint(org.lwjgl.glfw.GLFW.GLFW_VISIBLE, org.lwjgl.glfw.GLFW.GLFW_FALSE);
             // Same hints Minecraft uses: a 3.2 core context, not the driver default.
             org.lwjgl.glfw.GLFW.glfwWindowHint(org.lwjgl.glfw.GLFW.GLFW_CONTEXT_VERSION_MAJOR, 3);
