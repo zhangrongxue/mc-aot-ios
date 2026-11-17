@@ -65,7 +65,7 @@ jobs:
           "%GRAAL_HOME%\bin\javac.exe" -proc:none -cp graph.jar -d . b1\n05\ClientMain.java
           "%GRAAL_HOME%\bin\native-image.cmd" -Ob -cp "graph.jar;." -J-Xmx12g -J-XX:ActiveProcessorCount=2 ^
             -H:ReflectionConfigurationFiles=b1-reflect-config.json,b1-reflect-equals.json,b1-reflect-plugins.json,b1-reflect-services.json ^
-            -H:-CheckToolchain -H:IncludeResources=b1-config.* -H:IncludeResources=META-INF/services/.* ^
+            -H:-CheckToolchain -H:IncludeResources=b1-config.* -H:IncludeResources=assets/minecraft/lang/.* -H:IncludeResources=META-INF/services/.* ^
             --no-fallback -o b1client ClientMain
           if errorlevel 1 exit /b 1
           dir b1client.exe
