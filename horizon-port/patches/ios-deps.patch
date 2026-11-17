@@ -445,7 +445,7 @@ index 78cfdee..44bd551 100644
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
 diff --git a/crates/horizon-client/src/game.rs b/crates/horizon-client/src/game.rs
-index 55bd735..2068649 100644
+index 55bd735..136a199 100644
 --- a/crates/horizon-client/src/game.rs
 +++ b/crates/horizon-client/src/game.rs
 @@ -1189,6 +1189,8 @@ struct Game<'a> {
@@ -469,7 +469,7 @@ index 55bd735..2068649 100644
 +        // A visible pointer for touch menus: the finger drags this cursor and
 +        // a lift clicks where it sits.
 +        if self.screen != Screen::Playing {
-+            let [x, y] = self.cursor;
++            let (x, y) = self.cursor;
 +            batch.fill(&self.gui.atlas, x - 3.0, y - 3.0, 6.0, 6.0, rgba(0, 0, 0, 190));
 +            batch.fill(&self.gui.atlas, x - 2.0, y - 2.0, 4.0, 4.0, rgba(255, 255, 255, 230));
          }
