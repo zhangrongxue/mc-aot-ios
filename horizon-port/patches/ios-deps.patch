@@ -266,6 +266,36 @@ index a9121f7..a25b61b 100644
  wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
  
  [features]
+diff --git a/crates/horizon-client-render/src/gfx.rs b/crates/horizon-client-render/src/gfx.rs
+index f2d3b3a..4acedae 100644
+--- a/crates/horizon-client-render/src/gfx.rs
++++ b/crates/horizon-client-render/src/gfx.rs
+@@ -2211,9 +2211,16 @@ fn backend_order(
+     wgpu_backend: bool,
+ ) -> Vec<wgpu::Backends> {
+     use wgpu::Backends;
+-    if os == "macos" || wgpu_backend {
++    if wgpu_backend {
+         return vec![Backends::default()];
+     }
++    if os == "macos" {
++        return vec![Backends::default()];
++    }
++    // iOS has Metal only; `std::env::consts::OS` is "ios", not "macos".
++    if os == "ios" {
++        return vec![Backends::METAL];
++    }
+     let windows = os == "windows";
+     match api {
+         GraphicsApi::Auto if windows && arch == "aarch64" => {
+@@ -2230,6 +2237,7 @@ fn backends_name(backends: wgpu::Backends) -> &'static str {
+     match backends {
+         wgpu::Backends::VULKAN => "Vulkan",
+         wgpu::Backends::DX12 => "DirectX 12",
++        wgpu::Backends::METAL => "Metal",
+         wgpu::Backends::GL => "OpenGL",
+         _ => "graphics",
+     }
 diff --git a/crates/horizon-client/Cargo.toml b/crates/horizon-client/Cargo.toml
 index 7b7a557..8b097d7 100644
 --- a/crates/horizon-client/Cargo.toml
