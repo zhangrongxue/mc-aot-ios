@@ -96,7 +96,8 @@ public final class ClientMain {
             org.lwjgl.glfw.GLFW.glfwTerminate();
             return;
         }
-        startCapabilitiesWatchdog();
+        // NOTE: do not touch GLFW before Minecraft initialises it: any call sets a GLFW error that
+        // Minecraft's own GLX._initGlfw turns into an IllegalStateException.
         net.minecraft.client.main.Main.main(clientArgs);
     }
 
