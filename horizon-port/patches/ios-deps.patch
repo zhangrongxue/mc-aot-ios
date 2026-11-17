@@ -445,19 +445,21 @@ index 78cfdee..44bd551 100644
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
 diff --git a/crates/horizon-client/src/game.rs b/crates/horizon-client/src/game.rs
-index 55bd735..136a199 100644
+index 55bd735..f20023a 100644
 --- a/crates/horizon-client/src/game.rs
 +++ b/crates/horizon-client/src/game.rs
-@@ -1189,6 +1189,8 @@ struct Game<'a> {
+@@ -1189,6 +1189,10 @@ struct Game<'a> {
      last_input: Instant,
      /// Controllers (Horizon's own).
      pad: pad::Pads,
 +    /// On-screen controls for a touch screen (iOS).
 +    touch: horizon_client_render::touch::TouchControls,
++    /// The touch attack trigger was down at the last frame.
++    touch_attack_down: bool,
      frames: u64,
      /// The glint clock and options, read once per frame (game/interface/item_draw.rs).
      glint_frame: horizon_client::item_render::GlintFrame,
-@@ -5306,6 +5308,17 @@ impl Game<'_> {
+@@ -5306,6 +5310,21 @@ impl Game<'_> {
          self.draw_studio_bars(&mut batch);
          if show_hud {
              self.draw_pad_guide(&mut batch, guide_from);
@@ -466,20 +468,25 @@ index 55bd735..136a199 100644
 +                self.touch.draw(&mut batch, &self.gui.atlas);
 +            }
 +        }
-+        // A visible pointer for touch menus: the finger drags this cursor and
-+        // a lift clicks where it sits.
++        // A visible pointer and back button for touch menus: the finger drags
++        // the cursor, a lift clicks where it sits, and the top-left ESC box
++        // leaves an inventory or pause screen.
 +        if self.screen != Screen::Playing {
++            batch.fill(&self.gui.atlas, 4.0, 4.0, 52.0, 24.0, rgba(0, 0, 0, 210));
++            batch.fill(&self.gui.atlas, 5.0, 5.0, 50.0, 22.0, rgba(90, 90, 90, 230));
++            self.native_text(&mut batch, "ESC", [10.0, 11.0], 0xFFFFFFFF, true);
 +            let (x, y) = self.cursor;
 +            batch.fill(&self.gui.atlas, x - 3.0, y - 3.0, 6.0, 6.0, rgba(0, 0, 0, 190));
 +            batch.fill(&self.gui.atlas, x - 2.0, y - 2.0, 4.0, 4.0, rgba(255, 255, 255, 230));
          }
          batch
      }
-@@ -10741,6 +10754,7 @@ impl<'a> Game<'a> {
+@@ -10741,6 +10760,8 @@ impl<'a> Game<'a> {
              previous: now,
              last_input: now,
              pad: Default::default(),
 +            touch: Default::default(),
++            touch_attack_down: false,
              frames: 0,
              glint_frame: Default::default(),
              kept_block_entities: Default::default(),
@@ -633,7 +640,7 @@ index 16664ff..20a31e4 100644
      pub(super) fn pauses_game(&self) -> bool {
          self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..29e0460 100644
+index 2511aa2..7c79809 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -3,6 +3,11 @@
@@ -741,7 +748,7 @@ index 2511aa2..29e0460 100644
  impl ApplicationHandler for App {
      fn resumed(&mut self, event_loop: &ActiveEventLoop) {
          match self {
-@@ -427,6 +495,67 @@ impl ApplicationHandler for App {
+@@ -427,6 +495,86 @@ impl ApplicationHandler for App {
          }
      }
      fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -800,6 +807,25 @@ index 2511aa2..29e0460 100644
 +                })
 +            }
 +        };
++        if let App::Ready(game) = self {
++            if let WindowEvent::Touch(touch) = &event
++                && touch.phase == winit::event::TouchPhase::Started
++            {
++                let size = game
++                    .host
++                    .renderer
++                    .as_ref()
++                    .map_or([1, 1], |r| [r.config.width, r.config.height]);
++                let x = (touch.location.x - offset.0) / size[0] as f64;
++                let y = (touch.location.y - offset.1) / size[1] as f64;
++                if x < 0.10 && y < 0.12 {
++                    // The on-screen back button in a menu, so a touch player
++                    // can leave an inventory or a pause screen.
++                    let _ = game.host.key_pressed(KeyCode::Escape, KeyCode::Escape);
++                    return;
++                }
++            }
++        }
 +        if let Some(events) = touch_as_mouse(&event, offset) {
 +            for event in events {
 +                self.window_event(event_loop, id, event);
@@ -870,7 +896,7 @@ index ee73abf..3704fed 100644
      pub(super) fn facts(&self) -> &BlockFacts {
          &self.core.facts
 diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
-index 6a86a75..34beb36 100644
+index 6a86a75..7e89204 100644
 --- a/crates/horizon-client/src/game/runtime/window_handler.rs
 +++ b/crates/horizon-client/src/game/runtime/window_handler.rs
 @@ -2,6 +2,10 @@
@@ -884,12 +910,19 @@ index 6a86a75..34beb36 100644
  impl Game<'_> {
      /// A run that a person's stray key, click or mouse move would spoil: a screenshot sequence, a
      /// `HORIZON_TICK_SCRIPT` scenario or a `record-replay`. While one runs, the keyboard, mouse
-@@ -315,6 +319,16 @@ impl Game<'_> {
+@@ -315,6 +319,23 @@ impl Game<'_> {
          if self.pending_save.is_some() {
              return;
          }
 +        if self.screen == Screen::Playing {
-+            self.pad.inject_state(self.touch.poll_state());
++            let touch = self.touch.poll_state();
++            // A finger that lifts after mining must stop the attack even if the
++            // pad's trigger release is lost.
++            if self.touch_attack_down && touch.triggers[1] <= 0.1 {
++                self.stop_mining();
++            }
++            self.touch_attack_down = touch.triggers[1] > 0.1;
++            self.pad.inject_state(touch);
 +            self.apply_touch_requests();
 +        } else {
 +            // A finger can open a menu while it is still down. Clear the
@@ -901,7 +934,7 @@ index 6a86a75..34beb36 100644
          horizon_client::spans::time("pads", || self.poll_pads(event_loop));
          self.settle_after_run(event_loop);
          self.pause_if_inactive();
-@@ -325,10 +339,22 @@ impl Game<'_> {
+@@ -325,10 +346,22 @@ impl Game<'_> {
              event_loop.exit();
              return;
          }
@@ -925,7 +958,7 @@ index 6a86a75..34beb36 100644
                  let id = w.id();
                  self.handle_window_event(
                      event_loop,
-@@ -351,11 +377,23 @@ impl Game<'_> {
+@@ -351,11 +384,23 @@ impl Game<'_> {
          }
          // Consume the last frame's result: a hidden compositor may stop sending
          // redraws altogether, leaving a successful result stale indefinitely.
@@ -951,7 +984,7 @@ index 6a86a75..34beb36 100644
      }
  }
  
-@@ -437,14 +475,13 @@ impl ApplicationHandler for Game<'_> {
+@@ -437,14 +482,13 @@ impl ApplicationHandler for Game<'_> {
          };
          self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
          if let Some((event, modifiers)) = key {
