@@ -592,10 +592,21 @@ index ee73abf..e102a55 100644
      pub(super) fn facts(&self) -> &BlockFacts {
          &self.core.facts
 diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
-index 6a86a75..3b1f764 100644
+index 6a86a75..d88d341 100644
 --- a/crates/horizon-client/src/game/runtime/window_handler.rs
 +++ b/crates/horizon-client/src/game/runtime/window_handler.rs
-@@ -315,6 +315,9 @@ impl Game<'_> {
+@@ -2,6 +2,10 @@
+ //! and the idle step (`about_to_wait`).
+ use super::*;
+ 
++/// A heartbeat for the iOS port's logs: a frozen frame leaves the last
++/// `idle ...` line without its `drawn ...` partner.
++static FRAME_HEARTBEAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
++
+ impl Game<'_> {
+     /// A run that a person's stray key, click or mouse move would spoil: a screenshot sequence, a
+     /// `HORIZON_TICK_SCRIPT` scenario or a `record-replay`. While one runs, the keyboard, mouse
+@@ -315,6 +319,9 @@ impl Game<'_> {
          if self.pending_save.is_some() {
              return;
          }
@@ -605,9 +616,18 @@ index 6a86a75..3b1f764 100644
          horizon_client::spans::time("pads", || self.poll_pads(event_loop));
          self.settle_after_run(event_loop);
          self.pause_if_inactive();
-@@ -326,9 +329,13 @@ impl Game<'_> {
+@@ -325,10 +332,22 @@ impl Game<'_> {
+             event_loop.exit();
              return;
          }
++        let heartbeat = FRAME_HEARTBEAT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++        if heartbeat % 120 == 0 {
++            log::info!(
++                "Horizon: iOS idle {heartbeat} screen {:?} touch {:?}",
++                self.screen,
++                self.touch.state().left
++            );
++        }
          if let Some(w) = &self.window {
 -            if self.options.offscreen {
 +            if self.options.offscreen || cfg!(target_os = "ios") {
@@ -620,7 +640,17 @@ index 6a86a75..3b1f764 100644
                  let id = w.id();
                  self.handle_window_event(
                      event_loop,
-@@ -437,14 +444,13 @@ impl ApplicationHandler for Game<'_> {
+@@ -351,6 +370,9 @@ impl Game<'_> {
+         }
+         // Consume the last frame's result: a hidden compositor may stop sending
+         // redraws altogether, leaving a successful result stale indefinitely.
++        if heartbeat % 120 == 0 {
++            log::info!("Horizon: iOS drawn {heartbeat} ok={}", self.frame_drawn);
++        }
+         event_loop.set_control_flow(event_loop::redraw_flow(
+             &mut self.frame_drawn,
+             self.options.offscreen,
+@@ -437,14 +459,13 @@ impl ApplicationHandler for Game<'_> {
          };
          self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
          if let Some((event, modifiers)) = key {
