@@ -385,8 +385,105 @@ index 78cfdee..44bd551 100644
  /// Refuse startup if any merged copy could not be installed, before loading any mod.
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
+diff --git a/crates/horizon-client/src/game.rs b/crates/horizon-client/src/game.rs
+index 55bd735..0df8976 100644
+--- a/crates/horizon-client/src/game.rs
++++ b/crates/horizon-client/src/game.rs
+@@ -1189,6 +1189,8 @@ struct Game<'a> {
+     last_input: Instant,
+     /// Controllers (Horizon's own).
+     pad: pad::Pads,
++    /// On-screen controls for a touch screen (iOS).
++    touch: horizon_client::touch::TouchControls,
+     frames: u64,
+     /// The glint clock and options, read once per frame (game/interface/item_draw.rs).
+     glint_frame: horizon_client::item_render::GlintFrame,
+@@ -5306,6 +5308,10 @@ impl Game<'_> {
+         self.draw_studio_bars(&mut batch);
+         if show_hud {
+             self.draw_pad_guide(&mut batch, guide_from);
++            if self.screen == Screen::Playing {
++                self.touch.viewport(batch.width as u32, batch.height as u32);
++                self.touch.draw(&mut batch, &self.gui.atlas);
++            }
+         }
+         batch
+     }
+@@ -10741,6 +10747,7 @@ impl<'a> Game<'a> {
+             previous: now,
+             last_input: now,
+             pad: Default::default(),
++            touch: Default::default(),
+             frames: 0,
+             glint_frame: Default::default(),
+             kept_block_entities: Default::default(),
+diff --git a/crates/horizon-client/src/game/interface/pad/mod.rs b/crates/horizon-client/src/game/interface/pad/mod.rs
+index 026382e..e4778cd 100644
+--- a/crates/horizon-client/src/game/interface/pad/mod.rs
++++ b/crates/horizon-client/src/game/interface/pad/mod.rs
+@@ -282,6 +282,10 @@ impl Pads {
+         edges
+     }
+ 
++    /// The on-screen touch controls' state, as the virtual pad's.
++    pub(super) fn inject_state(&mut self, state: PadState) {
++        self.injected = state;
++    }
+     /// A replay's pad button, in place of `pad`'s line.
+     pub(super) fn inject_button(&mut self, button: Button, down: bool) {
+         self.injected.set(button, down);
+diff --git a/crates/horizon-client/src/game/interface/pointer_capture.rs b/crates/horizon-client/src/game/interface/pointer_capture.rs
+index 16664ff..4b18e39 100644
+--- a/crates/horizon-client/src/game/interface/pointer_capture.rs
++++ b/crates/horizon-client/src/game/interface/pointer_capture.rs
+@@ -55,6 +55,45 @@ impl Game<'_> {
+         let zoom = self.zoom_turn_scale();
+         self.turn_player(x * zoom, y * zoom);
+     }
++    /// One finger on the on-screen controls: the joystick and buttons feed the
++    /// virtual pad; a drag on the world turns the camera.
++    pub(super) fn touch_event(&mut self, touch: &winit::event::Touch) {
++        let [width, height] = self.renderer.as_ref().map_or_else(
++            || {
++                self.window.as_ref().map_or([1, 1], |w| {
++                    let size = w.inner_size();
++                    [size.width.max(1), size.height.max(1)]
++                })
++            },
++            |r| [r.config.width.max(1), r.config.height.max(1)],
++        );
++        self.touch.viewport(width, height);
++        let point = [
++            (touch.location.x as f32 / width as f32).clamp(0.0, 1.0),
++            (touch.location.y as f32 / height as f32).clamp(0.0, 1.0),
++        ];
++        let started = touch.phase == winit::event::TouchPhase::Started;
++        let ended = matches!(
++            touch.phase,
++            winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled
++        );
++        let turns = self
++            .touch
++            .update(touch.id as u64, point, started, ended);
++        if turns != [0.0, 0.0] {
++            let degrees = horizon_client::touch::camera_delta(
++                turns,
++                width,
++                height,
++                &self.touch.settings,
++            );
++            // `Entity.turn` units: the mouse's accumulated delta is degrees / 0.15.
++            self.look_turn(
++                f64::from(degrees[0]) / 0.15,
++                f64::from(degrees[1]) / 0.15,
++            );
++        }
++    }
+     /// `Minecraft.pause`: a single-player game with a pausing screen open.
+     pub(super) fn pauses_game(&self) -> bool {
+         self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..e408303 100644
+index 2511aa2..1bf6b64 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -265,7 +265,9 @@ impl Loading {
@@ -440,13 +537,20 @@ index 2511aa2..e408303 100644
  impl ApplicationHandler for App {
      fn resumed(&mut self, event_loop: &ActiveEventLoop) {
          match self {
-@@ -427,6 +462,15 @@ impl ApplicationHandler for App {
+@@ -427,6 +462,22 @@ impl ApplicationHandler for App {
          }
      }
      fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-+        // iOS has no mouse. Translate a finger into the pointer events the
-+        // menus and the game already understand; this is what makes the
-+        // first-run "Continue" button (and every later click) work.
++        // In play the on-screen joystick, buttons and look area own the
++        // fingers. Everywhere else a finger is a click for the menus.
++        if let WindowEvent::Touch(touch) = &event {
++            if let App::Ready(game) = self {
++                if game.screen == Screen::Playing {
++                    game.touch_event(touch);
++                    return;
++                }
++            }
++        }
 +        if let Some(events) = touch_as_mouse(&event) {
 +            for event in events {
 +                self.window_event(event_loop, id, event);
@@ -488,10 +592,20 @@ index ee73abf..e102a55 100644
      pub(super) fn facts(&self) -> &BlockFacts {
          &self.core.facts
 diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
-index 6a86a75..892fb80 100644
+index 6a86a75..3b1f764 100644
 --- a/crates/horizon-client/src/game/runtime/window_handler.rs
 +++ b/crates/horizon-client/src/game/runtime/window_handler.rs
-@@ -326,9 +326,13 @@ impl Game<'_> {
+@@ -315,6 +315,9 @@ impl Game<'_> {
+         if self.pending_save.is_some() {
+             return;
+         }
++        if self.screen == Screen::Playing {
++            self.pad.inject_state(self.touch.poll_state());
++        }
+         horizon_client::spans::time("pads", || self.poll_pads(event_loop));
+         self.settle_after_run(event_loop);
+         self.pause_if_inactive();
+@@ -326,9 +329,13 @@ impl Game<'_> {
              return;
          }
          if let Some(w) = &self.window {
@@ -506,7 +620,7 @@ index 6a86a75..892fb80 100644
                  let id = w.id();
                  self.handle_window_event(
                      event_loop,
-@@ -437,14 +441,13 @@ impl ApplicationHandler for Game<'_> {
+@@ -437,14 +444,13 @@ impl ApplicationHandler for Game<'_> {
          };
          self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
          if let Some((event, modifiers)) = key {
