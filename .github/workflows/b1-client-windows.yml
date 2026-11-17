@@ -65,6 +65,8 @@ jobs:
             Pop-Location
           }
           Get-ChildItem natives -Filter *.dll | Select-Object Name
+          # The LWJGL jars bring their own module descriptors; jar(1) refuses the Java 25 ones.
+          Get-ChildItem -Recurse -Filter module-info.class | Remove-Item -Force
           Write-Host "classes: $((Get-ChildItem -Recurse -Filter *.class).Count)"
           & "$env:GRAAL_HOME\bin\jar.exe" cf graph.jar -C . .
           Get-Item graph.jar | Select-Object Length
