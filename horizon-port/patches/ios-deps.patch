@@ -385,6 +385,21 @@ index 78cfdee..44bd551 100644
  /// Refuse startup if any merged copy could not be installed, before loading any mod.
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
+diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
+index 2511aa2..1f41843 100644
+--- a/crates/horizon-client/src/game/runtime/loading_screen.rs
++++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
+@@ -265,7 +265,9 @@ impl Loading {
+         }
+         self.poll_menu_realms(event_loop);
+         if let Some(w) = &self.window {
+-            if self.options.as_ref().is_some_and(|o| o.offscreen) {
++            if self.options.as_ref().is_some_and(|o| o.offscreen)
++                || cfg!(target_os = "ios")
++            {
+                 self.draw();
+             } else {
+                 w.request_redraw();
 diff --git a/crates/horizon-client/src/game/runtime/resource_tables.rs b/crates/horizon-client/src/game/runtime/resource_tables.rs
 index ee73abf..e102a55 100644
 --- a/crates/horizon-client/src/game/runtime/resource_tables.rs
@@ -417,10 +432,25 @@ index ee73abf..e102a55 100644
      pub(super) fn facts(&self) -> &BlockFacts {
          &self.core.facts
 diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
-index 6a86a75..229e188 100644
+index 6a86a75..892fb80 100644
 --- a/crates/horizon-client/src/game/runtime/window_handler.rs
 +++ b/crates/horizon-client/src/game/runtime/window_handler.rs
-@@ -437,14 +437,13 @@ impl ApplicationHandler for Game<'_> {
+@@ -326,9 +326,13 @@ impl Game<'_> {
+             return;
+         }
+         if let Some(w) = &self.window {
+-            if self.options.offscreen {
++            if self.options.offscreen || cfg!(target_os = "ios") {
+                 // Offscreen frames don't wait for the window to be drawn: an
+                 // occluded window (a locked macOS session) gets no redraws.
++                // iOS drives the frame here too: its CAMetalLayer-backed view
++                // does not get winit's `RedrawRequested` queue after the first
++                // frame, and requesting one during `AboutToWait` trips winit's
++                // own state assertion.
+                 let id = w.id();
+                 self.handle_window_event(
+                     event_loop,
+@@ -437,14 +441,13 @@ impl ApplicationHandler for Game<'_> {
          };
          self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
          if let Some((event, modifiers)) = key {
