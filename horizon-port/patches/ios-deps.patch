@@ -1,3 +1,16 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 52c624a..1d89be6 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -166,3 +166,8 @@ inherits = "release"
+ lto = false
+ codegen-units = 16
+ incremental = true
++
++# iOS 27 requires the UIScene life cycle. This branch is winit 0.30.13 plus the
++# 73-line UIScene adoption patch from Blackfall-Labs, pinned by commit.
++[patch.crates-io]
++winit = { git = "https://github.com/Blackfall-Labs/winit", rev = "f22b1e0c38b5e6f56205b2429ffff30c1e92ce42" }
 diff --git a/crates/horizon-client-input/Cargo.toml b/crates/horizon-client-input/Cargo.toml
 index 4709566..917c75d 100644
 --- a/crates/horizon-client-input/Cargo.toml
