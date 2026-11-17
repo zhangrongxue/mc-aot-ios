@@ -26,6 +26,8 @@ jobs:
             git -C /tmp/horizon fetch --depth 1 origin 69ab572dbd1bf2f2924a424f791014e09d9d0b50
             git -C /tmp/horizon checkout 69ab572dbd1bf2f2924a424f791014e09d9d0b50
             cp -R "$CIRCLE_WORKING_DIRECTORY/horizon-port/port/horizon-ios" /tmp/horizon/crates/horizon-ios
+            mkdir -p /tmp/horizon/third_party
+            tar -xzf "$CIRCLE_WORKING_DIRECTORY/horizon-port/third_party/winit.tar.gz" -C /tmp/horizon/third_party
             python3 -c 'from pathlib import Path; p=Path("/tmp/horizon/Cargo.toml"); s=p.read_text(); s=s.replace("members = [", "members = [\n    \"crates/horizon-ios\",", 1); p.write_text(s)'
             cd /tmp/horizon
             git rev-parse HEAD
