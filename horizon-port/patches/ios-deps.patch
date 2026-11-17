@@ -496,7 +496,7 @@ index 16664ff..81f11db 100644
      pub(super) fn pauses_game(&self) -> bool {
          self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..4ba2f31 100644
+index 2511aa2..74ae386 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -3,6 +3,11 @@
@@ -558,17 +558,23 @@ index 2511aa2..4ba2f31 100644
      }
      pub(super) fn draw(&mut self) {
          let Some(size) = self
-@@ -419,6 +448,39 @@ pub(super) enum App {
+@@ -419,6 +448,45 @@ pub(super) enum App {
      Loading(Box<Loading>),
      Ready(Box<split::Split<'static>>),
  }
 +#[cfg(target_os = "ios")]
-+fn touch_as_mouse(event: &WindowEvent) -> Option<Vec<WindowEvent>> {
++fn touch_as_mouse(event: &WindowEvent, scale: f64) -> Option<Vec<WindowEvent>> {
 +    let WindowEvent::Touch(touch) = event else {
 +        return None;
 +    };
 +    let device_id = touch.device_id.clone();
-+    let position = touch.location;
++    // winit reports the touch in window space; the menus hit-test in the
++    // renderer's larger surface. A 1:1 mapping made every menu tap land in
++    // the top-left quarter.
++    let position = winit::dpi::PhysicalPosition::new(
++        touch.location.x * scale,
++        touch.location.y * scale,
++    );
 +    let cursor = WindowEvent::CursorMoved { device_id: device_id.clone(), position };
 +    Some(match touch.phase {
 +        winit::event::TouchPhase::Started => vec![
@@ -591,14 +597,14 @@ index 2511aa2..4ba2f31 100644
 +}
 +
 +#[cfg(not(target_os = "ios"))]
-+fn touch_as_mouse(_event: &WindowEvent) -> Option<Vec<WindowEvent>> {
++fn touch_as_mouse(_event: &WindowEvent, _scale: f64) -> Option<Vec<WindowEvent>> {
 +    None
 +}
 +
  impl ApplicationHandler for App {
      fn resumed(&mut self, event_loop: &ActiveEventLoop) {
          match self {
-@@ -427,6 +489,36 @@ impl ApplicationHandler for App {
+@@ -427,6 +495,56 @@ impl ApplicationHandler for App {
          }
      }
      fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -626,7 +632,27 @@ index 2511aa2..4ba2f31 100644
 +                }
 +            }
 +        }
-+        if let Some(events) = touch_as_mouse(&event) {
++        let touch_scale = match self {
++            App::Ready(game) => {
++                let window = game.host.window.as_ref();
++                let inner = window.map_or(1, |w| w.inner_size().width.max(1)) as f64;
++                game.host
++                    .renderer
++                    .as_ref()
++                    .map_or(1.0, |r| r.config.width as f64 / inner)
++            }
++            App::Loading(loading) => {
++                let inner = loading
++                    .window
++                    .as_ref()
++                    .map_or(1, |w| w.inner_size().width.max(1)) as f64;
++                loading
++                    .renderer
++                    .as_ref()
++                    .map_or(1.0, |r| r.config.width as f64 / inner)
++            }
++        };
++        if let Some(events) = touch_as_mouse(&event, touch_scale) {
 +            for event in events {
 +                self.window_event(event_loop, id, event);
 +            }
