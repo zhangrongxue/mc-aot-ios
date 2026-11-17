@@ -42,6 +42,7 @@ public final class ClientMain {
         }
         seedLoaderPaths(gameDir);
         seedFmlLoader(gameDir);
+        seedMixinPlugins();
         seedHeadlessGlfw();
         net.minecraft.SharedConstants.tryDetectVersion();
         System.out.println("game version: " + net.minecraft.SharedConstants.getCurrentVersion().getName());
@@ -160,6 +161,7 @@ public final class ClientMain {
             game.set(null, gameDir);
             System.out.println("seeded FMLLoader");
             seedBackgroundWaiter();
+            seedScanHandler();
         } catch (Throwable error) {
             System.out.println("cannot seed FMLLoader: " + error);
         }
@@ -188,6 +190,52 @@ public final class ClientMain {
             }
         } catch (Throwable error) {
             System.out.println("cannot seed BackgroundWaiter: " + error);
+        }
+    }
+
+    /** Mixin normally instantiates each config plugin; the static runtime has to do it. */
+    private static void seedMixinPlugins() {
+        try (java.io.InputStream list = ClientMain.class.getResourceAsStream("/b1-mixin-plugins.txt")) {
+            if (list == null) {
+                return;
+            }
+            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(list, "UTF-8"));
+            String name;
+            while ((name = reader.readLine()) != null) {
+                name = name.trim();
+                if (name.isEmpty()) {
+                    continue;
+                }
+                try {
+                    Class<?> plugin = Class.forName(name, true, ClientMain.class.getClassLoader());
+                    Field field = plugin.getDeclaredField("instance");
+                    field.setAccessible(true);
+                    if (field.get(null) == null) {
+                        field.set(null, plugin.getDeclaredConstructor().newInstance());
+                        System.out.println("seeded mixin plugin " + name);
+                    }
+                } catch (Throwable error) {
+                    System.out.println("mixin plugin " + name + ": " + error);
+                }
+            }
+        } catch (Throwable error) {
+            System.out.println("cannot seed mixin plugins: " + error);
+        }
+    }
+
+    /** The mod loader waits for the background jar scan before initialising mods. */
+    private static void seedScanHandler() {
+        try {
+            Class<?> loader = Class.forName("net.neoforged.fml.loading.FMLLoader");
+            Field handler = loader.getDeclaredField("backgroundScanHandler");
+            handler.setAccessible(true);
+            if (handler.get(null) == null) {
+                Class<?> type = Class.forName("net.neoforged.fml.loading.modscan.BackgroundScanHandler");
+                handler.set(null, type.getDeclaredConstructor().newInstance());
+                System.out.println("seeded backgroundScanHandler");
+            }
+        } catch (Throwable error) {
+            System.out.println("cannot seed backgroundScanHandler: " + error);
         }
     }
 
