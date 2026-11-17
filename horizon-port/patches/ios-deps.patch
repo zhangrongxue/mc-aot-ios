@@ -546,10 +546,10 @@ index 026382e..c04f78b 100644
              self.pad.in_use = true;
              self.pad.keyboard_took_over = false;
 diff --git a/crates/horizon-client/src/game/interface/pointer_capture.rs b/crates/horizon-client/src/game/interface/pointer_capture.rs
-index 16664ff..8252762 100644
+index 16664ff..20a31e4 100644
 --- a/crates/horizon-client/src/game/interface/pointer_capture.rs
 +++ b/crates/horizon-client/src/game/interface/pointer_capture.rs
-@@ -55,6 +55,65 @@ impl Game<'_> {
+@@ -55,6 +55,82 @@ impl Game<'_> {
          let zoom = self.zoom_turn_scale();
          self.turn_player(x * zoom, y * zoom);
      }
@@ -612,11 +612,28 @@ index 16664ff..8252762 100644
 +            );
 +        }
 +    }
++    /// Acts on the one-shot touch buttons that are not pad buttons.
++    pub(super) fn apply_touch_requests(&mut self) {
++        use horizon_client::debug_keys::KeyAction;
++        if std::mem::take(&mut self.touch.debug_requested) {
++            self.debug_key(KeyCode::F3, KeyAction::Press);
++            self.debug_key(KeyCode::F3, KeyAction::Release);
++        }
++        if std::mem::take(&mut self.touch.perspective_requested) {
++            let _ = self.key_pressed(KeyCode::F5, KeyCode::F5);
++        }
++        if std::mem::take(&mut self.touch.settings_requested) {
++            let _ = self.key_pressed(KeyCode::F1, KeyCode::F1);
++        }
++        if std::mem::take(&mut self.touch.chat_requested) {
++            self.open_chat_method("");
++        }
++    }
      /// `Minecraft.pause`: a single-player game with a pausing screen open.
      pub(super) fn pauses_game(&self) -> bool {
          self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..6c26bf3 100644
+index 2511aa2..29e0460 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -3,6 +3,11 @@
@@ -746,7 +763,7 @@ index 2511aa2..6c26bf3 100644
 +                );
 +            }
 +            if let App::Ready(game) = self {
-+                if game.host.screen == Screen::Playing {
++                if game.host.screen == Screen::Playing && game.host.title.is_none() {
 +                    game.host.touch_event(touch);
 +                    return;
 +                }
@@ -853,7 +870,7 @@ index ee73abf..3704fed 100644
      pub(super) fn facts(&self) -> &BlockFacts {
          &self.core.facts
 diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
-index 6a86a75..a3d6bf8 100644
+index 6a86a75..34beb36 100644
 --- a/crates/horizon-client/src/game/runtime/window_handler.rs
 +++ b/crates/horizon-client/src/game/runtime/window_handler.rs
 @@ -2,6 +2,10 @@
@@ -867,12 +884,13 @@ index 6a86a75..a3d6bf8 100644
  impl Game<'_> {
      /// A run that a person's stray key, click or mouse move would spoil: a screenshot sequence, a
      /// `HORIZON_TICK_SCRIPT` scenario or a `record-replay`. While one runs, the keyboard, mouse
-@@ -315,6 +319,15 @@ impl Game<'_> {
+@@ -315,6 +319,16 @@ impl Game<'_> {
          if self.pending_save.is_some() {
              return;
          }
 +        if self.screen == Screen::Playing {
 +            self.pad.inject_state(self.touch.poll_state());
++            self.apply_touch_requests();
 +        } else {
 +            // A finger can open a menu while it is still down. Clear the
 +            // touch pad before the menu's mouse/keyboard input, or the last
@@ -883,7 +901,7 @@ index 6a86a75..a3d6bf8 100644
          horizon_client::spans::time("pads", || self.poll_pads(event_loop));
          self.settle_after_run(event_loop);
          self.pause_if_inactive();
-@@ -325,10 +338,22 @@ impl Game<'_> {
+@@ -325,10 +339,22 @@ impl Game<'_> {
              event_loop.exit();
              return;
          }
@@ -907,7 +925,7 @@ index 6a86a75..a3d6bf8 100644
                  let id = w.id();
                  self.handle_window_event(
                      event_loop,
-@@ -351,11 +376,23 @@ impl Game<'_> {
+@@ -351,11 +377,23 @@ impl Game<'_> {
          }
          // Consume the last frame's result: a hidden compositor may stop sending
          // redraws altogether, leaving a successful result stale indefinitely.
@@ -933,7 +951,7 @@ index 6a86a75..a3d6bf8 100644
      }
  }
  
-@@ -437,14 +474,13 @@ impl ApplicationHandler for Game<'_> {
+@@ -437,14 +475,13 @@ impl ApplicationHandler for Game<'_> {
          };
          self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
          if let Some((event, modifiers)) = key {
