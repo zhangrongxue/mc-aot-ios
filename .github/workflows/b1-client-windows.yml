@@ -52,14 +52,14 @@ jobs:
           Get-ChildItem -Recurse -Filter module-info.class | Remove-Item -Force
 
           # The pack ships a patched LWJGL ("3.3.3-snapshot") whose MemoryUtil demands
-          # sun.misc.Unsafe; the official 3.4.3 jars initialise inside an image.
+          # sun.misc.Unsafe; the official 3.3.3 jars initialise inside an image.
           $modules = "lwjgl", "lwjgl-glfw", "lwjgl-opengl", "lwjgl-stb", "lwjgl-tinyfd", "lwjgl-openal", "lwjgl-jemalloc", "lwjgl-freetype"
           New-Item -ItemType Directory -Force natives | Out-Null
           foreach ($m in $modules) {
-            $base = "https://repo1.maven.org/maven2/org/lwjgl/$m/3.4.3"
-            curl.exe -sSL -o "$m.jar" "$base/$m-3.4.3.jar"
+            $base = "https://repo1.maven.org/maven2/org/lwjgl/$m/3.3.3"
+            curl.exe -sSL -o "$m.jar" "$base/$m-3.3.3.jar"
             & "$env:GRAAL_HOME\bin\jar.exe" xf "$m.jar"
-            curl.exe -sSL -o "$m-natives.jar" "$base/$m-3.4.3-natives-windows.jar"
+            curl.exe -sSL -o "$m-natives.jar" "$base/$m-3.3.3-natives-windows.jar"
             Push-Location natives
             & "$env:GRAAL_HOME\bin\jar.exe" xf "..\$m-natives.jar"
             Pop-Location
