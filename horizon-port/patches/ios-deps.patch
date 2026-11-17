@@ -384,6 +384,37 @@ index 78cfdee..44bd551 100644
  /// Refuse startup if any merged copy could not be installed, before loading any mod.
  /// Cells cannot roll back: each copy merges all requesting rows, so stopping the whole
  /// start is how we ensure none of a refused mod's rows run.
+diff --git a/crates/horizon-client/src/game/runtime/resource_tables.rs b/crates/horizon-client/src/game/runtime/resource_tables.rs
+index ee73abf..e102a55 100644
+--- a/crates/horizon-client/src/game/runtime/resource_tables.rs
++++ b/crates/horizon-client/src/game/runtime/resource_tables.rs
+@@ -23,9 +23,23 @@ pub(super) fn load_animate_tables(
+ 
+ impl Resources {
+     pub(super) fn rest(&self) -> &WorldRest {
+-        self.rest
+-            .get()
+-            .expect("world resources joined before entry")
++        if let Some(rest) = self.rest.get() {
++            return rest;
++        }
++        // The title screen can draw before the background rest loader
++        // publishes its tables, especially on a phone's slower storage. Wait
++        // for the loader instead of panicking; the loader runs on its own
++        // thread and does not need the render thread.
++        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
++        loop {
++            if let Some(rest) = self.rest.get() {
++                return rest;
++            }
++            if std::time::Instant::now() >= deadline {
++                panic!("world resources were not loaded within 120 s");
++            }
++            std::thread::sleep(std::time::Duration::from_millis(5));
++        }
+     }
+     pub(super) fn facts(&self) -> &BlockFacts {
+         &self.core.facts
 diff --git a/crates/horizon-client/src/game/runtime/window_handler.rs b/crates/horizon-client/src/game/runtime/window_handler.rs
 index 6a86a75..229e188 100644
 --- a/crates/horizon-client/src/game/runtime/window_handler.rs
