@@ -418,45 +418,74 @@ index 55bd735..c23d97f 100644
              glint_frame: Default::default(),
              kept_block_entities: Default::default(),
 diff --git a/crates/horizon-client/src/game/interface/pad/mod.rs b/crates/horizon-client/src/game/interface/pad/mod.rs
-index 026382e..e4778cd 100644
+index 026382e..c04f78b 100644
 --- a/crates/horizon-client/src/game/interface/pad/mod.rs
 +++ b/crates/horizon-client/src/game/interface/pad/mod.rs
-@@ -282,6 +282,10 @@ impl Pads {
+@@ -56,6 +56,8 @@ pub(super) struct Pads {
+     devices: hardware::Devices,
+     /// The virtual pad of `horizon-ctl pad`.
+     injected: PadState,
++    /// The virtual pad came from the on-screen touch controls, not a pad.
++    touch_input: bool,
+     /// The virtual pad was in use at the last poll.
+     virtual_input: bool,
+     /// Buttons a `pad ... tap` releases at the next poll.
+@@ -282,6 +284,11 @@ impl Pads {
          edges
      }
  
 +    /// The on-screen touch controls' state, as the virtual pad's.
 +    pub(super) fn inject_state(&mut self, state: PadState) {
++        self.touch_input = state != PadState::default();
 +        self.injected = state;
 +    }
      /// A replay's pad button, in place of `pad`'s line.
      pub(super) fn inject_button(&mut self, button: Button, down: bool) {
          self.injected.set(button, down);
+@@ -432,6 +439,12 @@ impl Game<'_> {
+         self.ui.options.pad_glyphs = Glyphs::of(&self.settings.controller, self.pad.style);
+         self.ui.options.pad_driving = self.pad.in_use && self.pad_focus_mode();
+         let mut state = hardware.merge(&self.pad.injected);
++        if self.pad.touch_input {
++            // The on-screen controls are not a controller: keep the keyboard
++            // and mouse UI, and its menus, instead of switching to pad mode.
++            self.pad.in_use = false;
++            self.pad.keyboard_took_over = true;
++        }
+         let activity = self.pad.activity.observe(&state, &self.settings.controller);
+         for (i, (stick, deadzone)) in [
+             (&mut state.left, self.settings.controller.move_deadzone),
+@@ -453,7 +466,7 @@ impl Game<'_> {
+         }
+         let threshold = self.settings.controller.trigger_threshold;
+         let edges = self.pad.edges.update(&state, threshold);
+-        if activity && self.pad_focused() {
++        if activity && self.pad_focused() && !self.pad.touch_input {
+             self.last_input = Instant::now();
+             self.pad.in_use = true;
+             self.pad.keyboard_took_over = false;
 diff --git a/crates/horizon-client/src/game/interface/pointer_capture.rs b/crates/horizon-client/src/game/interface/pointer_capture.rs
-index 16664ff..81f11db 100644
+index 16664ff..8e70921 100644
 --- a/crates/horizon-client/src/game/interface/pointer_capture.rs
 +++ b/crates/horizon-client/src/game/interface/pointer_capture.rs
-@@ -55,6 +55,58 @@ impl Game<'_> {
+@@ -55,6 +55,55 @@ impl Game<'_> {
          let zoom = self.zoom_turn_scale();
          self.turn_player(x * zoom, y * zoom);
      }
 +    /// One finger on the on-screen controls: the joystick and buttons feed the
 +    /// virtual pad; a drag on the world turns the camera.
 +    pub(super) fn touch_event(&mut self, touch: &winit::event::Touch) {
-+        // winit gives touch positions in the window's coordinate space. Use
-+        // that same space here; the renderer's surface can be larger (its
-+        // scale factor), which made every touch land at half the screen and
-+        // only the centre buttons reachable at the edge.
-+        let [width, height] = self.window.as_ref().map_or_else(
++        // The renderer, the HUD and the touch controls all use the surface
++        // size. winit's `inner_size` is the safe area and is smaller than the
++        // surface on a notched device, so it must not be used here.
++        let [width, height] = self.renderer.as_ref().map_or_else(
 +            || {
-+                self.renderer.as_ref().map_or([1, 1], |r| {
-+                    [r.config.width.max(1), r.config.height.max(1)]
++                self.window.as_ref().map_or([1, 1], |w| {
++                    let size = w.inner_size();
++                    [size.width.max(1), size.height.max(1)]
 +                })
 +            },
-+            |w| {
-+                let size = w.inner_size();
-+                [size.width.max(1), size.height.max(1)]
-+            },
++            |r| [r.config.width.max(1), r.config.height.max(1)],
 +        );
 +        self.touch.viewport(width, height);
 +        let point = [
@@ -496,7 +525,7 @@ index 16664ff..81f11db 100644
      pub(super) fn pauses_game(&self) -> bool {
          self.has_singleplayer_server()
 diff --git a/crates/horizon-client/src/game/runtime/loading_screen.rs b/crates/horizon-client/src/game/runtime/loading_screen.rs
-index 2511aa2..74ae386 100644
+index 2511aa2..b9b81cb 100644
 --- a/crates/horizon-client/src/game/runtime/loading_screen.rs
 +++ b/crates/horizon-client/src/game/runtime/loading_screen.rs
 @@ -3,6 +3,11 @@
@@ -604,7 +633,7 @@ index 2511aa2..74ae386 100644
  impl ApplicationHandler for App {
      fn resumed(&mut self, event_loop: &ActiveEventLoop) {
          match self {
-@@ -427,6 +495,56 @@ impl ApplicationHandler for App {
+@@ -427,6 +495,38 @@ impl ApplicationHandler for App {
          }
      }
      fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -632,27 +661,9 @@ index 2511aa2..74ae386 100644
 +                }
 +            }
 +        }
-+        let touch_scale = match self {
-+            App::Ready(game) => {
-+                let window = game.host.window.as_ref();
-+                let inner = window.map_or(1, |w| w.inner_size().width.max(1)) as f64;
-+                game.host
-+                    .renderer
-+                    .as_ref()
-+                    .map_or(1.0, |r| r.config.width as f64 / inner)
-+            }
-+            App::Loading(loading) => {
-+                let inner = loading
-+                    .window
-+                    .as_ref()
-+                    .map_or(1, |w| w.inner_size().width.max(1)) as f64;
-+                loading
-+                    .renderer
-+                    .as_ref()
-+                    .map_or(1.0, |r| r.config.width as f64 / inner)
-+            }
-+        };
-+        if let Some(events) = touch_as_mouse(&event, touch_scale) {
++        // Menus hit-test in the renderer surface; winit's touch position is
++        // already in that same surface space.
++        if let Some(events) = touch_as_mouse(&event, 1.0) {
 +            for event in events {
 +                self.window_event(event_loop, id, event);
 +            }
